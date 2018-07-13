@@ -1,0 +1,29 @@
+# ShortStack Config File
+# do not use quotes around strins
+# leave blank for default options
+# do not edit the default section
+
+[user_facing_options]
+output_dir = ./
+input_s6=/home/selasady/selasady/shortstack_python3/Input/3gene_small_s6.csv
+target_fa=/home/selasady/selasady/shortstack_python3/Input/test_targets.fa
+encoding_table=/home/selasady/selasady/shortstack_python3/base_files/encoding.txt
+mutation_vcf=/home/selasady/selasady/shortstack_python3/Input/smarca_smad_pik3ca.vcf
+
+[internal_options]
+kmer_length=6
+qc_threshold=7
+
+
+### DO NOT EDIT THIS SECTION ###
+[DEFAULT]
+output_dir = ./
+input_s6=./Input/s6.json
+target_fa=./Input/targets.fa
+mutation_vcf=none
+encoding_table=./base_files/encoding.txt
+num_cores=6
+detection_mode=rapid
+kmer_length=6
+qc_threshold=7
+deltaZ_threshold=0
