@@ -8,10 +8,9 @@ vcf assumptions:
 - ref and alt strings must include base before the event
 
 '''
-
+import logging
 import pandas as pd
 import pandasql as psql
-import logging
 import numpy.testing as npt
 import pyximport; pyximport.install()
 import cython_funcs as cpy

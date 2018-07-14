@@ -76,6 +76,13 @@ import encoder
 import assemble_mutations as assemble
 import align
 
+# modules for align.py
+import scipy.stats as stats
+import time
+import pyximport; pyximport.install()
+import cython_funcs as cpy
+from itertools import count
+
 # get path to config file
 parser = argparse.ArgumentParser(description='Run ShortStack program.')
 parser.add_argument('-c','--config', help='Path to shortstack config file',required=True)
