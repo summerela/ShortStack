@@ -27,3 +27,11 @@ NanoString ShortStack assembly and variant calling tool for target regions
 
 ## To run: 
     python run_shortstack.py -c path/to/config.txt
+
+## Output
+- qc_metrcis.tsv: target reads that have been filtered out for containing:
+    - UC – uncalled bases where any position in the 3 spotter contains a 0
+    - QC – where any position in the 3 spotter quality score (fake QC score at this point) below qc_threshold
+- normalized_counts.tsv = counts per feature of each gene/target, normalized for multi-mapping
+- ftm_calls = ftm calls with zscore/deltaZ between top 2
+- run_report.txt – contains file paths to all input files and user options
