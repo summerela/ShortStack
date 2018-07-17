@@ -1,5 +1,28 @@
 # ShortStack
-NanoString ShortStack assembly and variant calling tool for target regions
+NanoString ShortStack assembly and variant calling tool for target regions. 
+
+Note: This program has only been optimized to run on the freya serever. 
+
+## Versions
+### Current
+- 0.1.1 contains only FTM, not complete sequencing and variant calling
+
+# Getting Started
+Make sure you have the following files availble: 
+- S6 file from imaging in either JSON or CSV format
+- FASTA file of reference sequences
+- Encoding file that maps basecalls to targets for each pool. A standard file can be found in ShortStack/base_files
+- Optional VCF file to create mutation reference sequences if you are searching for a particular set of variants. 
+
+## Installation
+For internal use, a current version will be maintained on the bioinformatics SVN at: 
+http://svn/repos/BIS/tools/ShortStack
+
+- Copy this directory to whatever server you would like to run ShortStack from. 
+- From the command line where you copied the directory, install the requirements by typing: 
+
+     pip3 install -r requirements.txt  
+- You should now be able to run the program from the command line
 
 ## Required Input: 
 ### s6 file:
