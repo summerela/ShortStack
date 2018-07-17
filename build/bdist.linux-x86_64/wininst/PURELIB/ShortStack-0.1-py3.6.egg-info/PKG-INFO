@@ -1,0 +1,12 @@
+Metadata-Version: 1.1
+Name: ShortStack
+Version: 0.1
+Summary: NanoString assembly and variant calling algorithm
+Home-page:  https://github.com/summerela/ShortStack
+Author: Summer R. Elasady
+Author-email: selasady@nanostring.com
+License: GNU Library or Lesser General Public License (LGPL)
+Description: UNKNOWN
+Platform: UNKNOWN
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Development Status :: Pre-Alpha
