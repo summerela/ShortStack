@@ -1,0 +1,30 @@
+# ShortStack Config File
+# do not use quotes around strings
+# leave blank for default options
+# do not edit the default section
+
+[user_facing_options]
+output_dir = ./
+input_s6=./example_files/krasNras_S6.csv
+target_fa=./example_files/kras_nras.fa
+encoding_table=./base_files/encoding.txt
+mutation_vcf=./example_files/kras_nras_mutant.vcf
+detection_mode=rapid
+
+[internal_options]
+kmer_length=6
+qc_threshold=7
+deltaZ_threshold=2
+
+### DO NOT EDIT THIS SECTION ###
+[DEFAULT]
+output_dir = ./
+input_s6=./Input/s6.json
+target_fa=./Input/targets.fa
+mutation_vcf=none
+encoding_table=./base_files/encoding.txt
+num_cores=6
+detection_mode=rapid
+qc_threshold=7
+deltaZ_threshold=0
+diversity_threshold=1

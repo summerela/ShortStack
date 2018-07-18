@@ -1,0 +1,9 @@
+##fileformat=VCFv4.1
+##fileDate=2018-04-01
+##source=ClinVar
+##reference=GRCh37
+##INFO=<ID=STRAND,Number=1,Type=String,Description="Enter + or - strand">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+12	25380238	KRASmut	G	C,A	.	.	STRAND=+
+12	25378562	FAKE_THING	G	C	.	.	STRAND=-
+12	25380238	KRASins	G	CTT	.	.	STRAND=+

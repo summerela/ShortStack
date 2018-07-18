@@ -6,7 +6,7 @@ def readme():
 
 
 setup(name='ShortStack',
-      version='0.1',
+      version='0.1.1',
       description='NanoString assembly and variant calling algorithm',
       url=' https://github.com/summerela/ShortStack',
       author='Summer R. Elasady',
