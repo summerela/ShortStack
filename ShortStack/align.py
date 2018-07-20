@@ -38,6 +38,24 @@ class Align():
         self.qc_outfile = qc_outfile
         self.count_file = "{}/normalized_counts.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
+        
+    def target_count(self):
+        '''
+        purpose: count number of targets found by position within each feature
+        input: encoded_df of feature ID and encoded color call
+        output: raw_counts.tsv file of raw counts
+        '''
+        # create output file path for raw counts
+        counts_outfile = "{}/raw_counts.tsv".format(self.output_dir)
+        
+        # sort encoded dataframe by featureID
+        self.encoded_df.sort_values("FeatureID", inplace=True)
+        # count number of targets found in each barcode
+        feature_counts = self.encoded_df.groupby(["FeatureID", "Target"]).size().reset_index()
+        # update columnnames        
+        feature_counts.columns = ["FeatureID", "Target", "count"]
+        # save raw count to file
+        feature_counts.to_csv(counts_outfile, sep="\t", index=None)
            
     def match_perfects(self):
         '''
@@ -203,7 +221,7 @@ class Align():
 
 
     def main(self):
-        
+        self.target_count()
         nonperfects, perfects = self.match_perfects()
         diversified_matches = self.diversity_filter(perfects)
         normalized_counts = self.normalize_counts(diversified_matches)
