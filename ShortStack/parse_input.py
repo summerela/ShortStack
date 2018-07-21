@@ -104,7 +104,7 @@ class Parse_files():
                 error_msg = "No basecalls passed filtering from S6: \n{}".format(e)
                 log.error(error_msg)
                 raise SystemExit(error_msg)
-                 
+
             return s6_df, qc_df
         
         except Exception as e:
@@ -139,7 +139,7 @@ class Parse_files():
                                                         'ALT':'object', 'STRAND':'S1',
                                                         'is_snp':'object'},
                                                  numbers={"ALT":1, "STRAND":1})
-            
+
             # test that required columns are present
             self.test_cols(mutation_df, "mutation vcf", ["CHROM", "POS", "ID", "REF", "ALT", "STRAND"]) 
             mutation_df.rename(columns={"CHROM":"chrom", "POS":"pos", "ID":"id", "REF":"ref", \
@@ -195,6 +195,7 @@ class Parse_files():
             
             # sort alphabetically by pool for faster matching
             encoding = encoding.sort_values(by=["PoolID", "BC"]).reset_index(drop=True)
+           
             return encoding
         except Exception as e:
             error_msg = "Error parsing encoding file: \n{}".format(e)
@@ -254,7 +255,6 @@ class Parse_files():
         
         # test that no two mutation ID's are the same
         assert fasta_df["id"].nunique() == fasta_df.shape[0]
-        
         return fasta_df.reset_index(drop=True)
  
     def s6_to_json(self):
@@ -334,7 +334,7 @@ class Parse_files():
         self.s6FileCheck()
         
         s6_df, qc_df = self.parse_s6()
-        if self.mutation_file != "none": 
+        if self.mutation_file.lower() != "none": 
             mutation_df = self.parse_mutations()
         else: 
             mutation_df = "none"

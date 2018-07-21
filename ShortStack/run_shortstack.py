@@ -228,7 +228,7 @@ class ShortStack():
         # parity_df comes from encoder.py
         qc_df = pd.concat([qc_df, parity_df], axis=0)
         qc_df.set_index("FeatureID", inplace=True, drop=True)
-        
+
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -250,8 +250,7 @@ class ShortStack():
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-            return mutant_fasta
-        
+            
         ###############
         ###   FTM   ###
         ###############

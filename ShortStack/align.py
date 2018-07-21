@@ -38,7 +38,8 @@ class Align():
         self.qc_outfile = qc_outfile
         self.count_file = "{}/normalized_counts.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
-        
+
+    
     def target_count(self):
         '''
         purpose: count number of targets found by position within each feature
@@ -47,7 +48,6 @@ class Align():
         '''
         # create output file path for raw counts
         counts_outfile = "{}/raw_counts.tsv".format(self.output_dir)
-        
         # sort encoded dataframe by featureID
         self.encoded_df.sort_values("FeatureID", inplace=True)
         # count number of targets found in each barcode
@@ -123,10 +123,10 @@ class Align():
         if diversity_filtered.shape[0] > 1:
             diversity_filtered.drop("diverse", inplace=True, axis=1)
             diversity_filtered.reset_index(drop=True, inplace=True)
-            filter_message = "The following calls were filtered out for being below the diversity threshold of {}:\n {}\n".\
-                format(self.diversity_threshold, diversity_filtered)
-            with open(self.run_info_file,'a') as f:
-                f.writelines(filter_message)
+#             filter_message = "The following calls were filtered out for being below the diversity threshold of {}:\n {}\n".\
+#                 format(self.diversity_threshold, diversity_filtered)
+#             with open(self.run_info_file,'a') as f:
+#                 f.writelines(filter_message)
         
         return diversified
         
@@ -204,15 +204,15 @@ class Align():
         
         # filter by zscore threshold
         pass_z = ftm_df[ftm_df.deltaZ.astype(float) >= float(self.deltaz_threshold)]
-        under_z = ftm_df[ftm_df.deltaZ.astype(float) < float(self.deltaz_threshold)]\
-            .reset_index(drop=True)
+#         under_z = ftm_df[ftm_df.deltaZ.astype(float) < float(self.deltaz_threshold)]\
+#             .reset_index(drop=True)
         
-        # add calls below zscore threshold to run_info.txt  
-        if under_z.shape[0] > 0:
-            filter_message = "The following calls were filtered for being below the detlaZ threshold of {}:\n {}\n"\
-            .format(self.deltaz_threshold, under_z)
-            with open(self.run_info_file, 'a') as f:
-                f.writelines(filter_message)
+#         # add calls below zscore threshold to run_info.txt  
+#         if under_z.shape[0] > 0:
+#             filter_message = "The following calls were filtered for being below the detlaZ threshold of {}:\n {}\n"\
+#             .format(self.deltaz_threshold, under_z)
+#             with open(self.run_info_file, 'a') as f:
+#                 f.writelines(filter_message)
         
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
         pass_z.to_csv(ftm_calls, sep="\t", index=False)
