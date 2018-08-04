@@ -4,7 +4,6 @@ module for matching s6 calls to probes
 
 import pandas as pd
 import numpy as np
-from numba import jit
 
 pd.options.mode.chained_assignment = None
 
@@ -15,9 +14,8 @@ class Encode_files():
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
-    
-    @jit        
-    def map_basecalls(self, s6_df, encoding_df):
+            
+    def map_basecalls(self, s6_df, encoding_df, dropna=False):
         '''
         Purpose: Replace color codes from s6 file with targets from encoding.txt
         Input: 
@@ -37,10 +35,6 @@ class Encode_files():
         parity_df["filter"] = "bc_parity"
         parity_df.drop("Target", axis=1, inplace=True)
         
-        return encoded_df, parity_df
-    
-    def remove_invalidBC(self, encoded_df):
-        
         try:
             # remove basecalls not valid in encoding file and reset index
             encoded_df = encoded_df[~encoded_df['Target'].isnull()].reset_index(drop=True)
@@ -50,10 +44,4 @@ class Encode_files():
             log.error(error_msg)
             raise SystemExit(error_msg)
 
-        return encoded_df
-    
-    def main(self, s6_df, encoded_df):
-        mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
-        enocoded_df = self.remove_invalidBC(mapped_df)
-        
-        return enocoded_df, parity_df
+        return encoded_df, parity_df

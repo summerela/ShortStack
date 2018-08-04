@@ -13,21 +13,19 @@ def split_fasta(input_file):
     output: lists of headers and sequences that will be passed to 
         parse_input.parse_fasta()
     '''
-    cdef info_list = []
-    cdef seq_list = []
+    info_list = []
+    seq_list = []
       
     f = open(input_file, 'r')
 
     # read in fasta and test line for > or erroneous <
     for line in f:
-        # skip header comments
-        if not line.startswith("#"):
-            if line.startswith(">") or line.startswith("<"):
-                # strip >:_ and spaces from from lines
-                info_list.append(line.replace(">", "").replace("<", "").strip())
-                # add sequences
-            else:
-                seq_list.append(line)
+        if line.startswith(">") or line.startswith("<"):
+            # strip >:_ and spaces from from lines
+            info_list.append(line.replace(">", "").replace("<", "").strip())
+            # add sequences
+        else:
+            seq_list.append(line)
             
     return info_list, seq_list
 
@@ -38,19 +36,19 @@ def process_mutations(input_df):
     output: fasta_df of combined reference and alternate sequences for assembly
     '''
     # process deletions
-    input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
+    input_df.alt_seq[(input_df.mut_type == 'del')] = \
         [seq[0:n] for n, seq in zip((input_df.var_start-input_df.mut_length), input_df.ref_seq)] +  \
         input_df["alt"] + \
         [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
             
     # process insertions
-    input_df.alt_seq[(input_df['mut_type'] == 'INS')] = \
+    input_df.alt_seq[(input_df['mut_type'] == 'ins')] = \
         [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
         input_df["alt"] + \
         [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
         
     # process snvs
-    input_df.alt_seq[(input_df['mut_type'] == 'SNV')] = \
+    input_df.alt_seq[(input_df['mut_type'] == 'snv')] = \
         [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
         input_df["alt"]+ \
         [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
@@ -69,20 +67,6 @@ def ngrams(str string, int n):
     cdef ngrams = []
     ngrams = zip(*[string[i:] for i in range(n)])
     return [''.join(ngram)for ngram in ngrams]
-
-def calc_hamming(str a, str b):
-    '''
-    purpose: calculate hamming distance between two strings
-    input: ngrams and targets
-    output: matrix of hamming distances between each target and ref seq ngram
-    '''
-    cdef int k, l, c
-    c = 0
-    l = len(a)
-    for k from 0 <= k < l:
-        if a[k] != b[k]:
-            c += 1
-    return c
 
 def match_basecall(str pattern, str seq):
     '''

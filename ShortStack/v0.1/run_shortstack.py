@@ -73,9 +73,8 @@ import psutil
 # import shortstack modules
 import parse_input 
 import encoder
-import parse_mutations as mut
-import ftm
-import variant_calling as vars
+import assemble_mutations as assemble
+import align
 
 # modules for align.py
 import scipy.stats as stats
@@ -221,7 +220,9 @@ class ShortStack():
         # instantiate encoder class from encoder.py
         encode = encoder.Encode_files(s6_df, encoding_df)
         # return dataframe of targets found for each molecule   
-        encoded_df, parity_df = encode.main(encoding_df,  s6_df)
+        encoded_df, parity_df = encode.map_basecalls(encoding_df=encoding_df, 
+                                   s6_df=s6_df, 
+                                   dropna=False)
         # add parity check information to qc_df
         # qc_df comes from parse_input.py
         # parity_df comes from encoder.py
@@ -234,31 +235,31 @@ class ShortStack():
         ## Supervised mode only ##
         # if mutations are provided, assemble mutation seqs from mutation_vcf
         if self.mutation_vcf != "none":
-            print("Assembling input variants.\n")
             log.info("Mutations assembled from:\n {}".format(self.mutation_vcf))
             # instantiate aligner module
-            mutations = mut.AssembleMutations(fasta_df,
+            assembler = assemble.AssembleMutations(fasta_df,
                                           mutation_df, 
                                           self.run_info_file,
-                                          s6_df)  
+                                          s6_df)
+              
             # add mutated reference sequences to fasta_df        
-            mutant_fasta = mutations.main()
+            mutant_fasta = assembler.main()
         # no mutations provided = unsupervised mode and mutant_fasta is empty
         else:
             mut_message = "No mutations provided. Entering unsupervised mode."
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-        
+            
         ###############
         ###   FTM   ###
         ###############
-        align_message = "Running FTM...\n"
+        align_message = "Running FTM for perfect matches.\n"
         print(align_message)
         log.info(align_message)
         
         # instantiate alignment module from align.py
-        run_ftm = ftm.FTM(fasta_df,
+        aligner = align.Align(fasta_df,
                               encoded_df, 
                               mutant_fasta,
                               self.detection_mode,
@@ -270,26 +271,7 @@ class ShortStack():
                               self.run_info_file
                               )
         # run first round of FTM
-        ngrams, ftm_df, nonmatches = run_ftm.main()
-        raise SystemExit("FTM complete. See output folder for results.")
-
-        #########################
-        ###   Find variants   ###
-        #########################
-        var_caller = vars.FindVars(ngrams, 
-                                      nonmatches,
-                                      fasta_df,
-                                      self.output_dir,
-                                      self.deltaz_threshold)
-        
-        # run FTM on potential SNV's and add to graph
-        var_df = var_caller.main()
-        
-        ##########################
-        ###   Generate Graph   ###
-        ##########################
-        
-
+        ftm_df, nonmatches = aligner.main()
             
         #########################
         ####   Reporting    #####
@@ -329,10 +311,3 @@ if __name__ == "__main__":
         sStack.main()
     except Exception as e:
         print(e)
-        
-        
-### Funcs for later functionality ##
-
-# skip unknown bases in seqs
-def clean_seq(seq):
-    return "".join([base for base in seq.upper() if base in "ATCG"])

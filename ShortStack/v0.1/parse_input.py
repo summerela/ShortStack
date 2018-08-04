@@ -32,7 +32,7 @@ class Parse_files():
         self.qc_threshold = int(qc_threshold)
         self.kmer_length = int(kmer_length)
         self.num_cores=num_cores
-      
+    
     def file_check(self, input_file):
         '''
         Purpose: check that input file paths exist and are not empty
@@ -46,7 +46,7 @@ class Parse_files():
             error_message = "Check that {} exists and is not empty.".format(input_file, e)
             log.error(error_message)
             raise SystemExit(error_msg)
-            
+     
     def test_cols(self, input_df, df_name, required_cols):
         '''
         purpose: test that required columns are present in an input dataframe
@@ -60,69 +60,59 @@ class Parse_files():
                 error_message = "{}\n{} column not found in {}".format(e, x, df_name)
                 log.error(error_message)
                 raise SystemExit(error_msg)  
-    
-    @jit        
-    def read_s6(self):
-        '''
-        purpose: read in s6 file in JSON format
-        input: file path to s6 file as self.input_s6
-        output: feature_df of parsed JSON S6 file
-        '''
-        # file handle to input s6.json
-        print("Reading in S6 file:{}".format(self.input_s6))
-        
-        # check that file exists and is not empty 
-        self.file_check(self.input_s6)
-            
-        # read in json with C ultrafast json
-        # this function will be parallelized when json file not nested improperly
-        json_data = pd.read_json(self.input_s6)    
-        feature_df = json_normalize(json_data["Features"], record_path=["Cycles","Pools"],
-                                    meta=["FeatureID"])
-            
-        return feature_df
-               
-    def parse_s6(self, feature_df):
+                   
+    def parse_s6(self):
         '''
          purpose: parse input s6 json file
          input: s6.json from imaging 
          output: s6 dataframe filtered for uncalled bases and qc score
                  qc dataframe with containing reads that were filtered out        
          '''
-        print("Parsing S6 file")
-       
-             
-        # filter out rows where basecall contains uncalled bases of 0 
-        pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
-        uncalled_df = feature_df[feature_df.BC.str.contains("0")]
-        uncalled_df["filter"] = "UC"
         
-        # filter out rows where the Qual score falls below self.qc_threshold
-        qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
-        s6_df = pass_calls[pass_calls.Qual.str.contains(qc_string) == False].reset_index(drop=True)
-        below_qc = feature_df[feature_df.Qual.str.contains(qc_string)]
-        below_qc["filter"] = "Qual"
-         
-        # create qc dataframe
-        qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
+        # file handle to input s6.json
+        print("Parsing S6 file:{}".format(self.input_s6))
+        log.info("Parsing S6 file:{}".format(self.input_s6))
         
-        return s6_df, qc_df
-       
-    def check_s6(self, s6_df):
-        '''
-        purpose: check that basecalls remain after qc filtering 
-        input: s6_df created in parse_s6
-        output: pass or fail assertion
-        '''
-             
-        # check that there are calls left after filtering
+        # check that file exists and is not empty 
+        self.file_check(self.input_s6)
+        
         try:
-            assert s6_df.shape[0] > 0
+            
+            # read in json with C ultrafast json
+            # this function will be parallelized when json file not nested improperly
+            json_data = pd.read_json(self.input_s6)    
+            feature_df = json_normalize(json_data["Features"], record_path=["Cycles","Pools"],
+                                        meta=["FeatureID"])
+             
+             # filter out rows where basecall contains uncalled bases of 0 
+            pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
+            uncalled_df = feature_df[feature_df.BC.str.contains("0")]
+            uncalled_df["filter"] = "UC"
+            
+            # filter out rows where the Qual score falls below self.qc_threshold
+            qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
+            s6_df = pass_calls[pass_calls.Qual.str.contains(qc_string) == False].reset_index(drop=True)
+            below_qc = feature_df[feature_df.Qual.str.contains(qc_string)]
+            below_qc["filter"] = "Qual"
+             
+            # create qc dataframe
+            qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
+             
+            # check that there are calls left after filtering
+            try:
+                assert s6_df.shape[0] > 0
+            except Exception as e:
+                error_msg = "No basecalls passed filtering from S6: \n{}".format(e)
+                log.error(error_msg)
+                raise SystemExit(error_msg)
+
+            return s6_df, qc_df
+        
         except Exception as e:
-            error_msg = "No basecalls passed filtering from S6: \n{}".format(e)
+            error_msg = "Error parsing S6 file: \n{}".format(e)
             log.error(error_msg)
             raise SystemExit(error_msg)
-    @jit                       
+                
     def parse_mutations(self):
         '''
         purpose: parse input mutation vcf file
@@ -135,41 +125,51 @@ class Parse_files():
         
         # check that file exists and is not empty 
         self.file_check(self.mutation_file)
-            
-        # read in mutation file, truncate to only one mutation per line
-        mutation_df = allel.vcf_to_dataframe(self.mutation_file, 
-                                             fields=['CHROM', 'POS', 'ID', 
-                                                     'REF', 'ALT', 
-                                                     'variants/STRAND',
-                                                     'variants/svlen'], 
-                                             alt_number=1,
-                                             types={'CHROM':'object', 'POS':'int32',
-                                                    'ID':'object', 'REF':'object',
-                                                    'ALT':'object', 'STRAND':'S1',
-                                                    'variants/svlen':int},
-                                             numbers={"ALT":1, "STRAND":1})
         
-        # test that required columns are present
-        self.test_cols(mutation_df, "mutation vcf", ["CHROM", "POS", "ID", "REF", "ALT", "STRAND"]) 
-        mutation_df.rename(columns={"CHROM":"chrom", "POS":"pos", "ID":"id", "REF":"ref", \
-                             "ALT":"alt", "STRAND":"strand"}, inplace=True)
+        try:
+            
+            # read in mutation file, truncate to only one mutation per line
+            mutation_df = allel.vcf_to_dataframe(self.mutation_file, 
+                                                 fields=['CHROM', 'POS', 'ID', 
+                                                         'REF', 'ALT', 
+                                                         'variants/STRAND', 
+                                                         'is_snp'], 
+                                                 alt_number=1,
+                                                 types={'CHROM':'object', 'POS':'int32',
+                                                        'ID':'object', 'REF':'object',
+                                                        'ALT':'object', 'STRAND':'S1',
+                                                        'is_snp':'object'},
+                                                 numbers={"ALT":1, "STRAND":1})
 
-        # test that no two mutation ID's are the same
-        assert mutation_df["id"].nunique() == mutation_df.shape[0]
+            # test that required columns are present
+            self.test_cols(mutation_df, "mutation vcf", ["CHROM", "POS", "ID", "REF", "ALT", "STRAND"]) 
+            mutation_df.rename(columns={"CHROM":"chrom", "POS":"pos", "ID":"id", "REF":"ref", \
+                                 "ALT":"alt", "STRAND":"strand"}, inplace=True)
 
-        # drop any identical mutations
-        mutation_df.drop_duplicates(["chrom", "pos", "ref", "alt", "strand"], inplace=True)
-                                  
-        # convert mutation lengths to mutation types
-        mutation_df['mut_type'] = ""
-        mutation_df['mut_type'][mutation_df["svlen"] == 0] = "SNV"   
-        mutation_df['mut_type'][mutation_df["svlen"] < 0] = "DEL"  
-        mutation_df['mut_type'][mutation_df["svlen"] > 0] = "INS"    
-        mutation_df["id"] = mutation_df.id.astype(str) + "_" + mutation_df.mut_type.astype(str)
+            # test that no two mutation ID's are the same
+            assert mutation_df["id"].nunique() == mutation_df.shape[0]
 
-        return mutation_df
-    
-    @jit    
+            # drop any identical mutations
+            mutation_df.drop_duplicates(["chrom", "pos", "ref", "alt", "strand"], inplace=True)
+                                      
+            # label mutation by length for bucketing
+            conditions = [
+                (mutation_df['ref'].str.len() <  mutation_df['alt'].str.len()),
+                (mutation_df['ref'].str.len() >  mutation_df['alt'].str.len()),
+                (mutation_df['is_snp'])
+                ]
+            choices = ['ins', 'del', 'snv']
+             
+            # add column with mutation type
+            mutation_df['mut_type'] = np.select(conditions, choices, default='')      
+            mutation_df.drop("is_snp", inplace=True, axis=1)      
+            return mutation_df
+        
+        except Exception as e:
+            error_msg = "Error parsing mutation vcf file: \n{}".format(e)
+            log.error(error_msg)
+            raise SystemExit(error_msg)
+      
     def parse_encoding(self):
         '''
         purpose: parse barcode encoding file
@@ -181,23 +181,28 @@ class Parse_files():
         log.info("Reading in encoding file from: {}".format(self.encoder_file))
         # check that file exists and is not empty 
         self.file_check(self.encoder_file)
-
-        required_cols = ["PoolID", "Target", "BC"]
-        encoding = pd.read_csv(self.encoder_file, sep="\t", header=0,
-                               usecols=required_cols,
-                               dtype={"PoolID":int,
-                                       "Target":str, 
-                                       "BC":str},
-                                      comment='#')
         
-        # test that required columns are present
-        self.test_cols(encoding, "encoding file", required_cols)
+        try:
         
-        # sort alphabetically by pool for faster matching
-        encoding = encoding.sort_values(by=["PoolID", "BC"]).reset_index(drop=True)
-        return encoding
-    
-    @jit
+            required_cols = ["PoolID", "Target", "BC"]
+            encoding = pd.read_csv(self.encoder_file, sep="\t", header=0,
+                                   usecols=required_cols,
+                                   dtype={"PoolID":int,
+                                           "Target":str, 
+                                           "BC":str})  
+            
+            # test that required columns are present
+            self.test_cols(encoding, "encoding file", required_cols)
+            
+            # sort alphabetically by pool for faster matching
+            encoding = encoding.sort_values(by=["PoolID", "BC"]).reset_index(drop=True)
+           
+            return encoding
+        except Exception as e:
+            error_msg = "Error parsing encoding file: \n{}".format(e)
+            log.error(error_msg)
+            raise SystemExit(error_msg)
+ 
     def split_fasta(self):
         '''
         purpose: split out fasta headers and sequences
@@ -211,7 +216,12 @@ class Parse_files():
         self.file_check(self.target_fa)
 
         # read in fasta using cython_funcs.split_fasta()
-        info_list, seq_list = cpy.split_fasta(self.target_fa)
+        try:
+            info_list, seq_list = cpy.split_fasta(self.target_fa)
+
+        # check that file exists                
+        except IOError:                    
+            print("{} does not exist".format(self.target_fa))
         
         return info_list, seq_list
     
@@ -246,23 +256,8 @@ class Parse_files():
         
         # test that no two mutation ID's are the same
         assert fasta_df["id"].nunique() == fasta_df.shape[0]
-        
         return fasta_df.reset_index(drop=True)
-    
-
-    def s6FileCheck(self):
-        '''
-        Purpose: Check if s6 file is .json, otherwise run converter method. 
-        input: s6 filepath
-        format: s6 of either json, csv, or tsv. Will break otherwise. 
-        output: Alters s6 file or returns same s6 file. 
-        '''
-        print(os.path.splitext(self.input_s6)[1].lower())
-        if os.path.splitext(self.input_s6)[1].lower() != '.json':
-            
-            print("Converting {} to JSON format.".format(self.input_s6))
-            self.s6_to_json()
-    
+ 
     def s6_to_json(self):
         '''
         Purpose: Check if s6 file csv or tsv, convert to json format
@@ -322,30 +317,30 @@ class Parse_files():
         with io.open(jsonfile, 'w', encoding='utf8') as outfile:
             outfile.write(ujson.dumps(TotalDict,indent = 4))
     
+    def s6FileCheck(self):
+        '''
+        Purpose: Check if s6 file is .json, otherwise run converter method. 
+        input: s6 filepath
+        format: s6 of either json, csv, or tsv. Will break otherwise. 
+        output: Alters s6 file or returns same s6 file. 
+        '''
+        if os.path.splitext(self.input_s6)[1] == '.json':
+            self.input_s6 = self.input_s6
+        else:
+            self.s6_to_json()
+       
+
     
     def main_parser(self):
-        
-        # check for CSV vs JSON
         self.s6FileCheck()
-
-        # read in s6 file
-        feature_df = self.read_s6()
         
-        # parse s6 file and return qc_df
-        s6_df, qc_df = self.parse_s6(feature_df)
-        self.check_s6(s6_df)
-        
-        # parse mutation file if provided
-        if self.mutation_file != "none": 
+        s6_df, qc_df = self.parse_s6()
+        if self.mutation_file.lower() != "none": 
             mutation_df = self.parse_mutations()
         else: 
             mutation_df = "none"
-        
-        # parse encoding file    
+            
         encoding_df = self.parse_encoding()
-        
-        # parse input fasta file
         fasta_df = self.parse_fasta()
-
         return s6_df, qc_df, mutation_df, encoding_df, fasta_df
             
