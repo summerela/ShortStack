@@ -216,6 +216,9 @@ class FTM():
         # calculate cumulative distribution function of the zscore
         max_df["cdf"] = max_df["zscore"].apply(lambda x: stats.norm.cdf(x))
         
+        ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
+        max_df.to_csv(ftm_calls, sep="\t", index=False)
+        
         return max_df
     
 #     @jit    
