@@ -113,18 +113,19 @@ class ShortStack():
         self.detection_mode = detection_mode
         self.deltaz_threshold = int(deltaz_threshold)
         self.diversity_threshold = int(diversity_threshold)
+        self.output_dir = output_dir
 
         
         # initialize file paths and output dirs
         self.running_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.abspath(config_path)
-        self.output_dir = "{}/output".format(output_dir)
+        
         # create output dir if not exists
         self.create_outdir(self.output_dir)
         self.qc_out_file = "{}/qc_metrics.tsv".format(self.output_dir)
         self.run_info_file = "{}/run_info.txt".format(self.output_dir)
         self.base_dir = "{rd}/base_files/".format(rd=self.running_dir)
-             
+            
         # gather input file locations
         self.input_s6 = os.path.abspath(input_s6)
         self.target_fa = os.path.abspath(target_fa)
@@ -271,7 +272,6 @@ class ShortStack():
                               )
         # run first round of FTM
         ngrams, ftm_df, nonmatches = run_ftm.main()
-        raise SystemExit("FTM complete. See output folder for results.")
 
         #########################
         ###   Find variants   ###
@@ -283,7 +283,7 @@ class ShortStack():
                                       self.deltaz_threshold)
         
         # run FTM on potential SNV's and add to graph
-        var_df = var_caller.main()
+#         var_df = var_caller.main()
         
         ##########################
         ###   Generate Graph   ###
