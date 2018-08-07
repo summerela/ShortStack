@@ -103,7 +103,8 @@ class ShortStack():
                  num_cores=4,
                  detection_mode="rapid",
                  deltaz_threshold=1,
-                 diversity_threshold=1):
+                 diversity_threshold=1,
+                 max_hamming_dist=1):
         
         # gather run options
         self.kmer_length = int(kmer_length)
@@ -113,10 +114,11 @@ class ShortStack():
         self.detection_mode = detection_mode
         self.deltaz_threshold = int(deltaz_threshold)
         self.diversity_threshold = int(diversity_threshold)
-        self.output_dir = output_dir
+        self.max_hamming_dist = int(max_hamming_dist)
 
         
         # initialize file paths and output dirs
+        self.output_dir = "{}/output/".format(output_dir)
         self.running_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_path = os.path.abspath(config_path)
         
@@ -271,16 +273,17 @@ class ShortStack():
                               self.run_info_file
                               )
         # run first round of FTM
-        ngrams, ftm_df, nonmatches = run_ftm.main()
+        ngrams, ftm_df, unmatched = run_ftm.main()
 
         #########################
         ###   Find variants   ###
         #########################
         var_caller = vars.FindVars(ngrams, 
-                                      nonmatches,
+                                      unmatched,
                                       fasta_df,
                                       self.output_dir,
-                                      self.deltaz_threshold)
+                                      self.deltaz_threshold,
+                                      self.max_hamming_dist)
         
         # run FTM on potential SNV's and add to graph
         var_df = var_caller.main()
@@ -323,7 +326,8 @@ if __name__ == "__main__":
                     kmer_length=config.get("internal_options","kmer_length"),
                     qc_threshold=config.get("internal_options","qc_threshold"),
                     deltaz_threshold=config.get("internal_options", "deltaZ_threshold"),
-                    diversity_threshold=config.get("internal_options", "diversity_threshold"))
+                    diversity_threshold=config.get("internal_options", "diversity_threshold"),
+                    max_hamming_dist=config.get("internal_options", "max_hamming_dist"))
     
     
         sStack.main()

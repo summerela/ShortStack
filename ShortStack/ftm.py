@@ -105,7 +105,19 @@ class FTM():
         
         # inner join between kmer seqs and targets to get matches
         matches = self.encoded_df.join(ngrams, how="inner").reset_index().rename(columns={'index' : 'target'})
-        return matches
+       
+        # return unmatched for hamming measurement
+        self.encoded_df.reset_index(inplace=True)
+        self.encoded_df["id"] = self.encoded_df.FeatureID.astype(str) + "_" + self.encoded_df.Target.astype(str)
+        matches["id"] = matches.FeatureID.astype(str) + "_" + matches.target.astype(str)
+        
+        unmatched = self.encoded_df[~self.encoded_df['id'].isin(matches['id'])]
+        
+        self.encoded_df.drop(["id"], axis=1, inplace=True)
+        matches.drop(["id"], axis=1, inplace=True)
+        unmatched.drop(["id"], axis=1, inplace=True)
+        
+        return unmatched, matches
     
     def diversity_filter(self, input_df):
         '''
@@ -220,53 +232,6 @@ class FTM():
         max_df.to_csv(ftm_calls, sep="\t", index=False)
         
         return max_df
-    
-#     @jit    
-#     def calc_deltaZ(self, match_df):
-#         '''
-#         purpose: calculate deltaZ ford diversity filtered matches and return FTM
-#         input: diversity filtered FTM calls from calc_Zscore
-#         output: FTM calls with zscore and deltaZ
-#         '''
-#         print(match_df.head())                    
-#         # calculate delta zscore
-#         deltas = match_df.groupby("FeatureID")\
-#             .transform(np.diff).rename(columns={"zscore":"deltaZ"})\
-#             .drop("count", axis=1).reset_index(drop=True)
-#         deltas["deltaZ"] = abs(deltas["deltaZ"])
-#         raise SystemExit(deltas)
-#         # add zscores to counts table and keep max
-#         scored_df = pd.concat([match_df, deltas], axis=1)
-#         ftm = scored_df.sort_values('count', ascending=False)\
-#             .drop_duplicates(['FeatureID'])
-#         ftm_df = ftm.sort_values("FeatureID", ascending=True).reset_index(drop=True)
-#         
-#         # filter by zscore threshold
-#         pass_z = ftm_df[ftm_df.deltaZ.astype(float) >= float(self.deltaz_threshold)]
-#         under_z = ftm_df[ftm_df.deltaZ.astype(float) < float(self.deltaz_threshold)]\
-#             .reset_index(drop=True)
-            
-#           # select top two genes with highest counts
-#         top2 = count_df.groupby(["FeatureID"], as_index=False)\
-#              .apply(lambda x:x.nlargest(2, columns=['zscore'])).reset_index(drop=True)
-#         
-#         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
-#         pass_z.to_csv(ftm_calls, sep="\t", index=False)
-
-#         return pass_z
-    
-    @jit
-    def return_unmatched(self, ftm_df, encoded_df):
-        '''
-        purpose: remove features that are called with FTM from downstream pipeline
-        input: dataframe pass_z of features that have been called by FTM,
-            dataframe unmatched_df of features that were not called in FTM
-        output: unmatched_df to pass along to variant calling pipeline
-        '''
-        
-        unmatched_df = encoded_df[~encoded_df.FeatureID.isin(ftm_df.FeatureID)].reset_index()
-        return unmatched_df
-
 
     def main(self):
         
@@ -280,7 +245,7 @@ class FTM():
     
         # match targets with basecalls
         print("Matching targets with reads...\n")
-        perfects = self.match_targets(ngrams)
+        unmatched, perfects = self.match_targets(ngrams)
         
         # filter for feature diversity
         print("Filtering results for feature diversity...\n")
@@ -297,10 +262,6 @@ class FTM():
         # calc delta zscore between all targets and select best match
         print("Running FTM...\n")
         ftm =self.return_ftm(zscored)
-        
-        # filter out ftm matches from downstream pipeline
-        print("Passing unmatched features to variant calling pipeline...\n")
-        unmatched = self.return_unmatched(ftm, self.encoded_df)
 
         # return ftm matches and diversity filtered non-perfects
         return ngrams, ftm, unmatched

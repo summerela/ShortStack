@@ -13,13 +13,15 @@ log = logging.getLogger(__name__)
 
 class FindVars():
     
-    def __init__(self, ngrams, non_matches, fasta_df, output_dir, deltaZ):
+    def __init__(self, ngrams, non_matches, fasta_df, 
+                 output_dir, deltaZ, max_hamming_dist):
         self.ngrams = ngrams.reset_index()
         self.non_matches = non_matches
         self.fasta_df = fasta_df
         self.output_dir = output_dir
         self.count_file = "{}/snv_normalized_counts.tsv".format(self.output_dir)
         self.deltaz_threshold = deltaZ
+        self.max_hamming_dist = max_hamming_dist
 
     def calc_hamming(self):
         '''
@@ -27,27 +29,23 @@ class FindVars():
         input: ngrams created in align.create_ngrams(), encoded_df
         output: dataframe of all potential vars's with hamming dist of 1
         '''
-        
-        # pull featureID out of the index from the encoding df
-        encoding = self.non_matches.reset_index(drop=True)
      
         # calc hamming distance for non-perfect matches
-        matches = encoding.Target.apply(lambda bc: self.ngrams.ngram.\
+        matches = self.non_matches.Target.apply(lambda bc: self.ngrams.ngram.\
                                 apply(lambda x: cpy.calc_hamming(bc, x)))
         
         # add labels for columns and index so we retain information
         matches.columns = self.ngrams.ngram.astype(str) + \
                          ":" + self.ngrams.gene.astype(str) + \
                          ":" + self.ngrams.pos.astype(str)       
-        matches.index = encoding.FeatureID.astype(str) + ":" +  encoding.Target.astype(str)
-
+        matches.index = self.non_matches.FeatureID.astype(str) + ":" +  self.non_matches.Target.astype(str)
         # merge dataframes to get hamming dist of 1
         df2 = matches.stack()
-        var_df = df2[(df2 == 1)]
+        var_df = df2[(df2 <= self.max_hamming_dist)]
         return var_df
     
     @jit
-    def parse_snvs(self, var_df):
+    def parse_vars(self, var_df):
         '''
         purpose: reformat the hamming distance df 
         input: dataframe of reads with hamming distance of 1
@@ -80,32 +78,9 @@ class FindVars():
         
         return hamming_df
     
-    def diversity_filter(self, input_df):
-        '''
-        purpose: filters out targets for a feature that are below self.diversity_threshold
-        input: matches_df built in align.match_perfects()
-        output: diversified dataframe filtered for only targets per feature that meet threshold
-        '''
-
-        # group by feature ID and gene
-        input_df["diverse"] = np.where(input_df.groupby(\
-            ["FeatureID", "gene"])["pos"].transform('nunique') > self.diversity_threshold, "T", "")
-        
-        diversified = input_df[input_df.diverse == "T"]
-        diversity_filtered = input_df[input_df.diverse != "T"]
-        diversified.drop("diverse", inplace= True, axis=1)
-        diversified.reset_index(inplace=True, drop=True)
-        
-        # notify user that certain features were filtered out for lack of diversity
-        if diversity_filtered.shape[0] > 1:
-            diversity_filtered.drop("diverse", inplace=True, axis=1)
-            filter_message = "The following calls were filtered out for being below the feature diversity threshold of {}:\n {}\n".\
-                format(self.diversity_threshold, diversity_filtered)
-            print(filter_message)
-                
-        return diversified
     
-    def count_snvs(self, var_df):
+    
+    def count_vars(self, var_df):
         '''
         purpose: count and normalize multi-mapped reads
         input: reshaped hamming_df for vars's
@@ -141,13 +116,6 @@ class FindVars():
         
         return counts
     
-#     def return_indels(self, counts_df, non_matches):
-#         counts_df["id"] = counts_df.FeatureID.astype(str) + "_" + counts_df.BC.astype(str)
-#         indels = non_matches[~non_matches.id.isin(counts_df.id)]
-#         print(indels.head())
-#         print(non_matches.head())
-#         raise SystemExit(counts_df.head())
-        
         
     def main(self):
         
@@ -157,16 +125,13 @@ class FindVars():
         
         print("Locating potential variants...\n")
         # parse var_df dataframe
-        hamming_df = self.parse_snvs(var_df)
+        hamming_df = self.parse_vars(var_df)
         
         print("Normalizing variant counts...\n")
         # normalize vars counts
-        snv_counts = self.count_snvs(hamming_df)
+        var_counts = self.count_vars(hamming_df)
         
-#         print("Saving unmatched features...\n")
-#         indels = self.return_indels(snv_counts, self.non_matches)
-        
-        return snv_counts
+        return var_counts
         
         
         
