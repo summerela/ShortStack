@@ -7,8 +7,9 @@ align.py
 - returns voting table from first round of FTM
 '''
 
-from http.cookiejar import unmatched
+# from http.cookiejar import unmatched
 import logging
+
 from scipy.spatial import distance
 from scipy import stats
 import cython_funcs as cpy
@@ -104,7 +105,6 @@ class FTM():
         
         # inner join between kmer seqs and targets to get matches
         matches = self.encoded_df.join(ngrams, how="inner").reset_index().rename(columns={'index' : 'target'})
-        
         return matches
     
     def diversity_filter(self, input_df):
@@ -133,7 +133,7 @@ class FTM():
         output: counts normalized counts dataframe to pass to algin.score_matches()
             raw counts saved to tsv file
         '''
-
+        
         # flag targets that are multi-mapped
         diversified_df['multi_mapped'] = np.where(diversified_df.groupby(["FeatureID", "gene", "target"]).pos\
                                     .transform('nunique') > 1, "T", '')
@@ -160,7 +160,7 @@ class FTM():
         counts["target_pos"] = counts.start.astype(int) + counts.pos.astype(int)
         counts.drop(["seq", "stop", "pos", "id", "start", "build"], axis=1, inplace=True)
         
-        # format dataframe for nicer output
+         # format dataframe for nicer output
         counts = counts[["FeatureID", "target", "gene", 
                          "chrom", "target_pos", "strand", "count"]]
         counts["count"] = counts["count"].round(2)
@@ -180,7 +180,7 @@ class FTM():
         purpose: calculate zscore between results 
         note: zscore calc output identical to scipy.stats.zscore, but numpy is faster
         input: filtered, normalized counts dataframe created in align.normalize_counts()
-        output: top2: df of top2 calls with zscores
+        output: df of top2 calls with zscores
         '''
         # group matches by feature ID and gene, then sum counts for each group
         count_df = counts.groupby(["FeatureID", "gene"]).sum().reset_index()
@@ -211,7 +211,7 @@ class FTM():
         max_df = max_df.drop("max_z", axis=1)
         
         # remove features with ties
-        max_df.drop_duplicates(keep=False, inplace=True)
+        max_df.drop_duplicates(subset="FeatureID", keep=False, inplace=True)
         
         # calculate cumulative distribution function of the zscore
         max_df["cdf"] = max_df["zscore"].apply(lambda x: stats.norm.cdf(x))
@@ -256,7 +256,7 @@ class FTM():
 #         return pass_z
     
     @jit
-    def return_unmatched(self, pass_z, encoded_df):
+    def return_unmatched(self, ftm_df, encoded_df):
         '''
         purpose: remove features that are called with FTM from downstream pipeline
         input: dataframe pass_z of features that have been called by FTM,
@@ -264,7 +264,7 @@ class FTM():
         output: unmatched_df to pass along to variant calling pipeline
         '''
         
-        unmatched_df = encoded_df[~encoded_df.FeatureID.isin(pass_z.FeatureID)].reset_index()
+        unmatched_df = encoded_df[~encoded_df.FeatureID.isin(ftm_df.FeatureID)].reset_index()
         return unmatched_df
 
 
