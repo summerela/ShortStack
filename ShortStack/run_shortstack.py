@@ -283,7 +283,7 @@ class ShortStack():
                                       self.deltaz_threshold)
         
         # run FTM on potential SNV's and add to graph
-#         var_df = var_caller.main()
+        var_df = var_caller.main()
         
         ##########################
         ###   Generate Graph   ###
