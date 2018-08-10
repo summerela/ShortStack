@@ -29,9 +29,10 @@ class Encode_files():
         print("Matching basecalls with color encoding")
 
         # match targets to base calls by merging s6_df and encoding_df
-        encoded_df = self.s6_df.merge(encoding_df, how='inner', on=["PoolID", "BC"])
-        encoded_df = encoded_df[["FeatureID", "Target"]]
+        encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
         encoded_df.sort_values(["FeatureID", "Target"], inplace=True)
+        encoded_df.reset_index(inplace=True, drop=True)
+        
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
         parity_df["filter"] = "bc_parity"
@@ -54,6 +55,5 @@ class Encode_files():
     
     def main(self, s6_df, encoded_df):
         mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
-        enocoded_df = self.remove_invalidBC(mapped_df)
-        
+        enocoded_df = self.remove_invalidBC(mapped_df).reset_index(drop=True)
         return enocoded_df, parity_df
