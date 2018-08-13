@@ -28,3 +28,4 @@ detection_mode=rapid
 qc_threshold=7
 deltaZ_threshold=0
 diversity_threshold=1
+max_hamming_dist=1
