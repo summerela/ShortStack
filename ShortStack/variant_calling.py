@@ -13,11 +13,13 @@ log = logging.getLogger(__name__)
 
 class FindVars():
     
-    def __init__(self, ngrams, non_matches, fasta_df, 
-                 output_dir, deltaZ, max_hamming_dist):
+    def __init__(self, ngrams, non_matches, fasta_df, kmer_length,
+                 mutation_vcf, output_dir, deltaZ, max_hamming_dist):
         self.ngrams = ngrams.reset_index()
         self.non_matches = non_matches
         self.fasta_df = fasta_df
+        self.kmer_length = kmer_length
+        self.mutation_vcf = mutation_vcf
         self.output_dir = output_dir
         self.count_file = "{}/snv_normalized_counts.tsv".format(self.output_dir)
         self.deltaz_threshold = deltaZ
@@ -26,36 +28,43 @@ class FindVars():
     def calc_hamming(self):
         '''
         purpose: calculate hamming distance between basecalls and targets
-        input: ngrams created in align.create_ngrams(), encoded_df
-        output: dataframe of all potential vars's with hamming dist of 1
+        input: ngrams created in ftm.create_ngrams(), non_
+        output: dataframe of potential vars's with hamming <= max_hamming_dist
         '''
-     
+
         # calc hamming distance for non-perfect matches
         matches = self.non_matches.Target.apply(lambda bc: self.ngrams.ngram.\
                                 apply(lambda x: cpy.calc_hamming(bc, x)))
-        
+    
         # add labels for columns and index so we retain information
         matches.columns = self.ngrams.ngram.astype(str) + \
                          ":" + self.ngrams.gene.astype(str) + \
                          ":" + self.ngrams.pos.astype(str)       
         matches.index = self.non_matches.FeatureID.astype(str) + ":" +  self.non_matches.Target.astype(str)
-        # merge dataframes to get hamming dist of 1
+        
+        # filter dataframes to get hamming dist <= self.max_hamming_dist
         df2 = matches.stack()
+        
+        # find all variants that overlap with max_hamming_dist
         var_df = df2[(df2 <= self.max_hamming_dist)]
+       
+        # return ham>1 <= kmer <= (self.kmer_length - 1) = less strict
+#         var_df = df2[df2.between(1, (self.kmer_length - 1))]
+
         return var_df
     
     @jit
     def parse_vars(self, var_df):
         '''
         purpose: reformat the hamming distance df 
-        input: dataframe of reads with hamming distance of 1
+        input: dataframe of reads with hamming distance <= self.max_hamming_dist
         output: reshaped hamming_df 
         '''
         
         var_df = var_df.reset_index()
         var_df.columns = ["Target", "Gene", "Hamming"]
         
-        # split var_df into separate columns
+        # split var_df index into columns to add back into dataframe
         targets = pd.DataFrame(var_df.Target.str.split(':',1).tolist())
         targets.columns = ["FeatureID", "BC"]
         matches =  pd.DataFrame(var_df.Gene.str.split(':',1).tolist())
@@ -68,17 +77,17 @@ class FindVars():
         vars = pd.concat([targets, matches, genes], axis=1)
     
         # join vars with fasta_df to get ref position info
-        hamming_df = vars.merge(self.fasta_df[["chrom", "start", "id"]], left_on="Gene", right_on="id")     
+        hamming_df = vars.merge(self.fasta_df[["chrom", "start", "id"]], \
+                                 left_on="Gene", right_on="id")     
         
-        # calculate variant starting position on reference, subtract 1 for 0 based indexing
-        hamming_df["var_pos"] = (hamming_df["start"].astype(int) - hamming_df["Pos"].astype(int)) - 1
+        # calculate starting position of match on reference, subtract 1 for 0 based indexing
+        hamming_df["var_pos"] = (hamming_df["start"].astype(int) \
+                             - hamming_df["Pos"].astype(int)) - 1
         
         # drop unnecessary columns
         hamming_df.drop(["id", "Pos", "start"], inplace=True, axis=1) 
-        
+
         return hamming_df
-    
-    
     
     def count_vars(self, var_df):
         '''
