@@ -76,6 +76,7 @@ import encoder
 import parse_mutations as mut
 import ftm
 import variant_calling as vars
+import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
@@ -260,40 +261,57 @@ class ShortStack():
         print(align_message)
         log.info(align_message)
         
-        # instantiate alignment module from align.py
+        # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
                               mutant_fasta,
                               self.detection_mode,
                               self.deltaz_threshold,
                               self.kmer_length,
+                              self.max_hamming_dist,
                               self.output_dir,
                               self.diversity_threshold,
                               self.qc_out_file,
                               self.run_info_file
                               )
-        # run first round of FTM
-        ngrams, ftm_df, unmatched = run_ftm.main()
+        # run FTM
+        ngrams, ftm_df, hamming_df = run_ftm.main()
 
         #########################
         ###   Find variants   ###
         #########################
-        var_caller = vars.FindVars(ngrams, 
-                                      unmatched,
-                                      fasta_df,
-                                      self.output_dir,
-                                      self.deltaz_threshold,
-                                      self.max_hamming_dist)
-        
-        # run FTM on potential SNV's and add to graph
-        var_df = var_caller.main()
+#         hamming_message = "Locating potential variants...\n"
+#         print(hamming_message)
+#         log.info(hamming_message)
+#         
+#         # instantiate variant calling module from variant_calling.py
+#         var_caller = vars.FindVars(ngrams, 
+#                                       unmatched,
+#                                       fasta_df,
+#                                       self.kmer_length,
+#                                       self.mutation_vcf,
+#                                       self.output_dir,
+#                                       self.deltaz_threshold,
+#                                       self.max_hamming_dist)
+#         
+#         # run FTM on potential SNV's and add to graph
+#         var_df = var_caller.main()
         
         ##########################
         ###   Generate Graph   ###
         ##########################
+        graph_message = "Creating sequence graph...\n"
+        print(graph_message)
+        log.info(graph_message)
         
+        # instantiate variant graph from variant_graph.py
+        vg = var_graph.VariantGraph(fasta_df,
+                                    hamming_df,
+                                    ftm_df,
+                                    self.kmer_length)
 
-            
+#         vg.main()
+        
         #########################
         ####   Reporting    #####
         #########################    
