@@ -14,6 +14,7 @@ import pandasql as psql
 import numpy.testing as npt
 import pyximport; pyximport.install()
 import cython_funcs as cpy
+import swifter
 
 # import logger
 log = logging.getLogger(__name__)
@@ -101,10 +102,10 @@ class AssembleMutations():
         valid_mutations["var_start"] = (valid_mutations["pos"].astype(int) - valid_mutations["ref_start"].astype(int)) - 1
         
         # check that mutation ref allele matches position on reference
-        npt.assert_array_equal( valid_mutations.apply(lambda x: x['ref_seq'][x['var_start']], 1),
-                                 valid_mutations.apply(lambda x: x['ref'][-1], 1), \
+        npt.assert_array_equal( valid_mutations.swifter.apply(lambda x: x['ref_seq'][x['var_start']], 1),
+                                 valid_mutations.swifter.apply(lambda x: x['ref'][-1], 1), \
                                "Check that mutations found in vcf are found in ref seq.")
-
+        raise SystemExit("success")
         # calculate length of mutation
         valid_mutations['mut_length'] = 1 # initialize column with 1 so we don't have to calc snv's
         valid_mutations.mut_length[(valid_mutations['mut_type'] == 'del')] = \
