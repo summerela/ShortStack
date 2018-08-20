@@ -75,8 +75,7 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
-import variant_calling as vars
-import variant_graph as var_graph
+#import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
