@@ -17,7 +17,6 @@ from numba import jit
 import numpy as np
 import pandas as pd
 import swifter 
-from multiprocessing import Pool
 
 
 # import logger
@@ -135,21 +134,21 @@ class FTM():
         output: reshaped hamming_df 
         '''
         
-        # process in parallel
-        pool = Pool()   
+#         # process in parallel
+#         pool = Pool()   
+#         
+#         # create function to split columns
+#         target_results = pool.apply_async(self.split_cols, [hamming_df.Target, ["FeatureID", "BC"]])
+#         match_results =  pool.apply_async(self.split_cols, [hamming_df.Ref, ["Target_Match", "Ref"]])
         
-        # create function to split columns
-        target_results = pool.apply_async(self.split_cols, [hamming_df.Target, ["FeatureID", "BC"]])
-        match_results =  pool.apply_async(self.split_cols, [hamming_df.Ref, ["Target_Match", "Ref"]])
-        
-        targets = target_results.get(timeout=30)
-        matches = match_results.get(timeout=30)
+        targets = self.split_cols(hamming_df.Target, ["FeatureID", "BC"])
+        matches = self.split_cols(hamming_df.Ref, ["Target_Match", "Ref"])
         
         genes = pd.DataFrame(matches.Ref.str.split(':',1).tolist())
         genes.columns = ["Ref", "Pos"]
         matches.drop("Ref", axis=1, inplace=True)
         hamming = hamming_df.Hamming
-        
+
         # concatenate dataframe back together
         kmers = pd.concat([targets, matches, genes, hamming], axis=1)
         
@@ -172,7 +171,8 @@ class FTM():
         
         # filter hamming df by self.max_hamming_dist
         hamming_df = hamming_df[hamming_df.Hamming <= self.max_hamming_dist]
-
+        hamming_df.reset_index(drop=True, inplace=True)
+        
         return hamming_df
     
 #     @jit             
@@ -224,7 +224,9 @@ class FTM():
         perfects = diversified[diversified.Hamming == 0]
         
         # save diversified hamming_df temporarily for Nicole
-        diversified.to_csv("./output/diversified_hamming_all.tsv", sep="\t", 
+        div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
+        diversified.to_csv(div_file, 
+                      sep="\t", 
                       index=False, 
                       header=True)
         
