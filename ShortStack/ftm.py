@@ -17,6 +17,8 @@ from numba import jit
 import numpy as np
 import pandas as pd
 import swifter 
+from multiprocessing import Pool
+
 
 # import logger
 log = logging.getLogger(__name__)
@@ -119,18 +121,30 @@ class FTM():
         return hamming2
     
     @jit
+    def split_cols(self, df_col, name_list):
+        results = pd.DataFrame(df_col.str.split(':', 1).tolist())
+        results.columns = name_list
+        
+        return results
+    
+    @jit
     def parse_vars(self, hamming_df):
         '''
         purpose: reformat the hamming distance df 
         input: dataframe of reads with hamming distance <= self.max_hamming_dist
         output: reshaped hamming_df 
         '''
-                    
-        # split hamming_df index into columns to add back into dataframe
-        targets = pd.DataFrame(hamming_df.Target.str.split(':',1).tolist())
-        targets.columns = ["FeatureID", "BC"]
-        matches =  pd.DataFrame(hamming_df.Ref.str.split(':',1).tolist())
-        matches.columns = ["Target_Match", "Ref"]
+        
+        # process in parallel
+        pool = Pool()   
+        
+        # create function to split columns
+        target_results = pool.apply_async(self.split_cols, [hamming_df.Target, ["FeatureID", "BC"]])
+        match_results =  pool.apply_async(self.split_cols, [hamming_df.Ref, ["Target_Match", "Ref"]])
+        
+        targets = target_results.get(timeout=30)
+        matches = match_results.get(timeout=30)
+        
         genes = pd.DataFrame(matches.Ref.str.split(':',1).tolist())
         genes.columns = ["Ref", "Pos"]
         matches.drop("Ref", axis=1, inplace=True)
@@ -138,7 +152,7 @@ class FTM():
         
         # concatenate dataframe back together
         kmers = pd.concat([targets, matches, genes, hamming], axis=1)
-    
+        
         # join kmers with fasta_df to get ref position info
         hamming_df = kmers.merge(self.fasta_df[["chrom", "start", "id"]], \
                                  left_on="Ref", right_on="id")     
@@ -203,17 +217,19 @@ class FTM():
         
         # filter out targets that do not meet diversity threshold
         diversified = input_df[input_df.diverse == "T"]
-        diversity_filtered = input_df[input_df.diverse != "T"]
         diversified.drop("diverse", inplace= True, axis=1)
         diversified.reset_index(inplace=True, drop=True)
         
-         # find all variants that overlap with max_hamming_dist
+         # find perfect matches
         perfects = diversified[diversified.Hamming == 0]
         
         # save diversified hamming_df temporarily for Nicole
         diversified.to_csv("./output/diversified_hamming_all.tsv", sep="\t", 
                       index=False, 
                       header=True)
+        
+        # subset hamming_df to pass on to variant graph
+        diversified = diversified[["FeatureID", "BC", "chrom", "pos"]]
                 
         return diversified, perfects
     
@@ -235,9 +251,8 @@ class FTM():
         multi = diversified_df[diversified_df["multi_mapped"] == "T"]\
             .drop("multi_mapped", axis=1)
         
-         # add counts to non multi mapped reads
-        non["count"] = non.groupby(["FeatureID", "Ref", "BC"])["pos"]\
-            .transform("count")
+        # non multi mapped reads get a count of 1 each
+        non["count"] = 1
     
         # add counts to multi-mapped reads with normaliztion 
         multi["count"] = multi.groupby(["FeatureID", "Ref", "BC"])["pos"]\
@@ -248,6 +263,9 @@ class FTM():
         counts["count"] = counts["count"].round(2)
         counts.drop(["Target_Match"], axis=1, inplace=True)
         counts.reset_index(inplace=True, drop=True)
+
+        # group together to get counts of basecall per target
+        counts = counts.groupby(["FeatureID", "BC", "Ref"])["count"].sum().reset_index()
 
         # save raw counts to file
         counts.to_csv(self.count_file, sep="\t", 
@@ -263,29 +281,30 @@ class FTM():
         input: filtered, normalized counts dataframe created in align.normalize_counts()
         output: df of top2 calls with zscores
         '''
-        # group matches by feature ID and gene, then sum counts for each group
-        count_df = counts.groupby(["FeatureID", "Ref"]).sum().reset_index()
-
+        
+        # sum counts per gene
+        count_df = counts.groupby(['FeatureID', 'Ref']).sum().reset_index()
+        
         # formula for calculating zscore
         zscore = lambda x: (x - np.mean(x)) / np.std(x)
-        
         # add zscore for each feature count
-        count_df["zscore"] =  count_df.groupby("FeatureID")["count"].apply(zscore)
-        # filter out NaN zscores as they represent a tie
-        count_df.dropna(subset=["zscore"], inplace=True)
-        
+        count_df["zscore"] = count_df.groupby("FeatureID")["count"].apply(zscore)
+
         return count_df
 
     def return_ftm(self, count_df):
     
         ### locate rows with max zscore ###
         
-        # create column containing max zscore and return rows that match that score
-        # note: this is faster than the one-line transform function
+        # create column containing max zscore 
         max_z = count_df.groupby(['FeatureID']).agg({'zscore':'max'}).reset_index()
+        
+        # merge max zscore column back with original results, many to one
         max_df = pd.merge(count_df, max_z, how='left', on=['FeatureID'])
+        # rename columns 
         max_df = max_df.rename(columns={'zscore_x':'zscore', 'zscore_y':'max_z'})
-        # this will return all rows with max zscore so we can filter out ties
+        
+        # return all rows that match max zscore 
         max_df = max_df[max_df['zscore'] == max_df['max_z']]
         max_df = max_df.drop("max_z", axis=1)
         
@@ -295,10 +314,16 @@ class FTM():
         # calculate cumulative distribution function of the zscore
         max_df["cdf"] = max_df["zscore"].swifter.apply(lambda x: stats.norm.cdf(x))
         
+        # format ftm df for output to file
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
         max_df.to_csv(ftm_calls, sep="\t", index=False)
         
-        return max_df
+        # subset ftm dataframe for memory efficiency to pass to variant graph
+        ftm_df = max_df[["FeatureID", "Ref"]]
+        ftm_df.columns = ["FeatureID", "FTM_call"]
+        ftm_df.reset_index(inplace=True, drop=True)
+
+        return ftm_df
 
     def main(self):
         
@@ -329,7 +354,7 @@ class FTM():
         # calc zscore for each feature
         print("Calculating Zscores...\n")
         zscored =self.calc_Zscore(normalized_counts)
-        
+
         # calc delta zscore between all targets and select best match
         print("Running FTM...\n")
         ftm =self.return_ftm(zscored)

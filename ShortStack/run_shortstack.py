@@ -75,7 +75,8 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
-# import variant_graph as var_graph
+import variant_calling as vars
+import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
@@ -279,15 +280,15 @@ class ShortStack():
         ##########################
         ###   Generate Graph   ###
         ##########################
-#         graph_message = "Creating sequence graph...\n"
-#         print(graph_message)
-#         log.info(graph_message)
-#         
-#         # instantiate variant graph from variant_graph.py
-#         vg = var_graph.VariantGraph(fasta_df,
-#                                     hamming_df,
-#                                     ftm_df,
-#                                     self.kmer_length)
+        graph_message = "Creating sequence graph...\n"
+        print(graph_message)
+        log.info(graph_message)
+        
+        # instantiate variant graph from variant_graph.py
+        vg = var_graph.VariantGraph(fasta_df,
+                                    hamming_df,
+                                    ftm_df,
+                                    self.kmer_length)
 
 #         vg.main()
         
