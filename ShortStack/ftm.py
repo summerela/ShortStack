@@ -17,7 +17,8 @@ from numba import jit
 import numpy as np
 import pandas as pd
 import swifter 
-
+import multiprocessing as mp
+import concurrent.futures as cf
 
 # import logger
 log = logging.getLogger(__name__)
@@ -40,8 +41,22 @@ class FTM():
         self.diversity_threshold = diversity_threshold
         self.qc_outfile = qc_outfile
         self.hamming_file = "{}/hamming_dist_all.tsv".format(self.output_dir)
-        self.count_file = "{}/perfects_normCounts.tsv".format(self.output_dir)
+        self.count_file = "{}/all_normCounts.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
+        self.num_cores = mp.cpu_count()-3 
+        
+        # remove before release
+        self.div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
+        
+    def parallelize_dataframe(self, df, func):
+        
+        chunks = round(df.shape[0]/10)
+        df_split = np.array_split(df, chunks)
+        
+        with cf.ProcessPoolExecutor(self.num_cores) as pool:
+            df = pd.concat(pool.map(func, df_split))
+        
+        return df
     
     @jit    
     def target_count(self):
@@ -104,7 +119,7 @@ class FTM():
         # calc hamming distance for non-perfect matches
         hamming_df = self.encoded_df.Target.apply(lambda bc: ngrams.ngram.\
                                 apply(lambda x: cpy.calc_hamming(bc, x)))
-        
+
         # add labels for columns and index so we retain information
         hamming_df.columns = ngrams.ngram.astype(str) + \
                          ":" + ngrams.gene.astype(str) + \
@@ -115,8 +130,11 @@ class FTM():
         # reshape dataframe for parsing    
         hamming2 = hamming_df.stack()  
         hamming2 = hamming2.reset_index()
-        hamming2.columns = ["Target", "Ref", "Hamming"]     
-
+        hamming2.columns = ["Target", "Ref", "Hamming"] 
+        
+         # filter hamming df by self.max_hamming_dist
+        hamming2 = hamming2[hamming2.Hamming <= self.max_hamming_dist]
+    
         return hamming2
     
     @jit
@@ -133,18 +151,22 @@ class FTM():
         input: dataframe of reads with hamming distance <= self.max_hamming_dist
         output: reshaped hamming_df 
         '''
-      
+    
         targets = self.split_cols(hamming_df.Target, ["FeatureID", "BC"])
         matches = self.split_cols(hamming_df.Ref, ["Target_Match", "Ref"])
-        
+
         genes = pd.DataFrame(matches.Ref.str.split(':',1).tolist())
         genes.columns = ["Ref", "Pos"]
         matches.drop("Ref", axis=1, inplace=True)
-        hamming = hamming_df.Hamming
-
-        # concatenate dataframe back together
-        kmers = pd.concat([targets, matches, genes, hamming], axis=1)
         
+        # concatenate dataframe back together
+        kmers = pd.concat([targets, matches, genes, hamming_df.Hamming], axis=1)
+
+        return kmers
+    
+    @jit
+    def add_ref_pos(self, kmers):
+
         # join kmers with fasta_df to get ref position info
         hamming_df = kmers.merge(self.fasta_df[["chrom", "start", "id"]], \
                                  left_on="Ref", right_on="id")     
@@ -157,16 +179,8 @@ class FTM():
         hamming_df.drop(["id", "Pos", "start"], inplace=True, axis=1) 
         hamming_df.reset_index(inplace=True, drop=True)
         
-        # save full hamming_df to file
-        hamming_df.to_csv(self.hamming_file, sep="\t", 
-                      index=False, 
-                      header=True)
-        
-        # filter hamming df by self.max_hamming_dist
-        hamming_df = hamming_df[hamming_df.Hamming <= self.max_hamming_dist]
-        hamming_df.reset_index(drop=True, inplace=True)
-        
         return hamming_df
+        
     
 #     @jit             
 #     def match_targets(self, ngrams):
@@ -196,7 +210,7 @@ class FTM():
 #         unmatched.drop(["id"], axis=1, inplace=True)
 #         
 #         return unmatched, matches
-    
+    @jit 
     def diversity_filter(self, input_df):
         '''
         purpose: filters out targets for a feature that are below self.diversity_threshold
@@ -212,16 +226,9 @@ class FTM():
         diversified = input_df[input_df.diverse == "T"]
         diversified.drop("diverse", inplace= True, axis=1)
         diversified.reset_index(inplace=True, drop=True)
-        
-        # save diversified hamming_df temporarily for Nicole
-        div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
-        diversified.to_csv(div_file, 
-                      sep="\t", 
-                      index=False, 
-                      header=True)
                
         return diversified
-    
+
     def normalize_counts(self, diversified_df):
         '''
         purpose: normalize multi-mapped reads as total count in gene/total count all genes
@@ -233,7 +240,7 @@ class FTM():
         # flag targets that are multi-mapped
         diversified_df['multi_mapped'] = np.where(diversified_df.groupby(["FeatureID", "Ref", "BC"]).pos\
                                     .transform('nunique') > 1, "T", '')
-        
+
         # separate multi and non multi mapped reads
         non = diversified_df[diversified_df["multi_mapped"] != "T"]\
             .drop("multi_mapped", axis=1)   
@@ -252,7 +259,7 @@ class FTM():
         counts["count"] = counts["count"].round(2)
         counts.drop(["Target_Match"], axis=1, inplace=True)
         counts.reset_index(inplace=True, drop=True)
-        
+        print(counts.head(40))
         # seperate perfect matches for passing to FTM
         perfects = counts[counts.Hamming == 0]
         
@@ -263,9 +270,7 @@ class FTM():
         counts.to_csv(self.count_file, sep="\t", 
                       index=False, 
                       header=True)
-        
-        
-        
+
         return counts, perfects
     
     
@@ -319,21 +324,6 @@ class FTM():
         ftm_df.reset_index(inplace=True, drop=True)
 
         return ftm_df
-    
-    def parallelize_dataframe(self, df, func):
-        import multiprocessing as mp
-        # leave a few cores free to be nice
-        num_cores = mp.cpu_count()-3  
-        # split df into paritions = num_cores
-        num_partitions = num_cores 
-        df_split = np.array_split(df, num_partitions)
-        # create multiprocess thread pool
-        pool = mp.Pool(num_cores)
-        # merge results back together
-        df = pd.concat(pool.map(func, df_split))
-        pool.close()
-        pool.join()
-        return df
 
     def main(self):
         
@@ -352,14 +342,25 @@ class FTM():
 
         # parse results of hamming calculation
         print("Parsing results...\n")
-        hamming_df = self.parallelize_dataframe(target_df, self.parse_hamming)
-        hamming_df.reset_index(inplace=True, drop=True)
+        kmers_df = self.parse_hamming(target_df)
+        
+        # add convert python index to position on input ref seq
+        print("Adding position on reference sequence...\n")
+        hamming_df = self.add_ref_pos(kmers_df)
+        # save full hamming_df to file
+        hamming_df.to_csv(self.hamming_file, sep="\t", 
+                      index=False, 
+                      header=True)
 
         # filter for feature diversity
         print("Filtering results for feature diversity...\n")
-        diversified_hamming = self.parallelize_dataframe(hamming_df, 
-                                    self.diversity_filter)
-
+        diversified_hamming = self.diversity_filter(hamming_df)
+         # save diversified hamming_df temporarily for Nicole
+        diversified_hamming.to_csv(self.div_file, 
+                      sep="\t", 
+                      index=False, 
+                      header=True)
+        
         # normalize multi-mapped reads
         print("Normalizing multi-mapped reads...\n")
         normalized_counts, perfects = self.normalize_counts(diversified_hamming)
@@ -374,3 +375,6 @@ class FTM():
 
         # return ftm matches and diversity filtered non-perfects
         return ngrams, ftm, normalized_counts
+        
+
+        
