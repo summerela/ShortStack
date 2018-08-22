@@ -111,7 +111,7 @@ class FTM():
                          ":" + ngrams.pos.astype(str)       
         hamming_df.index = self.encoded_df.FeatureID.astype(str) + ":" +  \
             self.encoded_df.Target.astype(str)  
-        
+
         # reshape dataframe for parsing    
         hamming2 = hamming_df.stack()  
         hamming2 = hamming2.reset_index()
@@ -127,20 +127,13 @@ class FTM():
         return results
     
     @jit
-    def parse_vars(self, hamming_df):
+    def parse_hamming(self, hamming_df):
         '''
         purpose: reformat the hamming distance df 
         input: dataframe of reads with hamming distance <= self.max_hamming_dist
         output: reshaped hamming_df 
         '''
-        
-#         # process in parallel
-#         pool = Pool()   
-#         
-#         # create function to split columns
-#         target_results = pool.apply_async(self.split_cols, [hamming_df.Target, ["FeatureID", "BC"]])
-#         match_results =  pool.apply_async(self.split_cols, [hamming_df.Ref, ["Target_Match", "Ref"]])
-        
+      
         targets = self.split_cols(hamming_df.Target, ["FeatureID", "BC"])
         matches = self.split_cols(hamming_df.Ref, ["Target_Match", "Ref"])
         
@@ -220,20 +213,14 @@ class FTM():
         diversified.drop("diverse", inplace= True, axis=1)
         diversified.reset_index(inplace=True, drop=True)
         
-         # find perfect matches
-        perfects = diversified[diversified.Hamming == 0]
-        
         # save diversified hamming_df temporarily for Nicole
         div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
         diversified.to_csv(div_file, 
                       sep="\t", 
                       index=False, 
                       header=True)
-        
-        # subset hamming_df to pass on to variant graph
-        diversified = diversified[["FeatureID", "BC", "chrom", "pos"]]
-                
-        return diversified, perfects
+               
+        return diversified
     
     def normalize_counts(self, diversified_df):
         '''
@@ -242,7 +229,7 @@ class FTM():
         output: counts normalized counts dataframe to pass to algin.score_matches()
             raw counts saved to tsv file
         '''
-
+        
         # flag targets that are multi-mapped
         diversified_df['multi_mapped'] = np.where(diversified_df.groupby(["FeatureID", "Ref", "BC"]).pos\
                                     .transform('nunique') > 1, "T", '')
@@ -255,7 +242,7 @@ class FTM():
         
         # non multi mapped reads get a count of 1 each
         non["count"] = 1
-    
+        
         # add counts to multi-mapped reads with normaliztion 
         multi["count"] = multi.groupby(["FeatureID", "Ref", "BC"])["pos"]\
               .transform(lambda x: 1/x.nunique())
@@ -265,18 +252,24 @@ class FTM():
         counts["count"] = counts["count"].round(2)
         counts.drop(["Target_Match"], axis=1, inplace=True)
         counts.reset_index(inplace=True, drop=True)
-
-        # group together to get counts of basecall per target
+        
+        # seperate perfect matches for passing to FTM
+        perfects = counts[counts.Hamming == 0]
+        
+        # group together to get counts of basecall per target for all matches < max_ham_dist
         counts = counts.groupby(["FeatureID", "BC", "Ref"])["count"].sum().reset_index()
 
         # save raw counts to file
         counts.to_csv(self.count_file, sep="\t", 
                       index=False, 
                       header=True)
-        return counts
+        
+        
+        
+        return counts, perfects
     
     
-    def calc_Zscore(self, counts):
+    def calc_Zscore(self, perfects):
         '''
         purpose: calculate zscore between results 
         note: zscore calc output identical to scipy.stats.zscore, but numpy is faster
@@ -285,7 +278,7 @@ class FTM():
         '''
         
         # sum counts per gene
-        count_df = counts.groupby(['FeatureID', 'Ref']).sum().reset_index()
+        count_df = perfects.groupby(['FeatureID', 'Ref']).sum().reset_index()
         
         # formula for calculating zscore
         zscore = lambda x: (x - np.mean(x)) / np.std(x)
@@ -326,6 +319,21 @@ class FTM():
         ftm_df.reset_index(inplace=True, drop=True)
 
         return ftm_df
+    
+    def parallelize_dataframe(self, df, func):
+        import multiprocessing as mp
+        # leave a few cores free to be nice
+        num_cores = mp.cpu_count()-3  
+        # split df into paritions = num_cores
+        num_partitions = num_cores 
+        df_split = np.array_split(df, num_partitions)
+        # create multiprocess thread pool
+        pool = mp.Pool(num_cores)
+        # merge results back together
+        df = pd.concat(pool.map(func, df_split))
+        pool.close()
+        pool.join()
+        return df
 
     def main(self):
         
@@ -339,30 +347,30 @@ class FTM():
 
         # match targets with basecalls
         print("Calculating hamming distance...\n")
-        hamming_df = self.calc_hamming(ngrams)
-        
+        target_df = self.parallelize_dataframe(ngrams, self.calc_hamming)
+        target_df.reset_index(inplace=True, drop=True)
+
         # parse results of hamming calculation
         print("Parsing results...\n")
-        hamming_df = self.parse_vars(hamming_df)
-        
+        hamming_df = self.parallelize_dataframe(target_df, self.parse_hamming)
+        hamming_df.reset_index(inplace=True, drop=True)
+
         # filter for feature diversity
         print("Filtering results for feature diversity...\n")
-        diversified_hamming, perfects = self.diversity_filter(hamming_df)
-        
+        diversified_hamming = self.parallelize_dataframe(hamming_df, 
+                                    self.diversity_filter)
+
         # normalize multi-mapped reads
         print("Normalizing multi-mapped reads...\n")
-        normalized_counts = self.normalize_counts(perfects)
+        normalized_counts, perfects = self.normalize_counts(diversified_hamming)
 
         # calc zscore for each feature
         print("Calculating Zscores...\n")
-        zscored =self.calc_Zscore(normalized_counts)
+        zscored =self.calc_Zscore(perfects)
 
         # calc delta zscore between all targets and select best match
         print("Running FTM...\n")
         ftm =self.return_ftm(zscored)
 
         # return ftm matches and diversity filtered non-perfects
-        return ngrams, ftm, diversified_hamming
-        
-
-        
+        return ngrams, ftm, normalized_counts
