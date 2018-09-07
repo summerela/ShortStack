@@ -17,7 +17,6 @@ from numba import jit
 import numpy as np
 import pandas as pd
 import swifter 
-import multiprocessing as mp
 import concurrent.futures as cf
 
 # import logger
@@ -27,9 +26,9 @@ class FTM():
     
     def __init__(self, fasta_df, encoded_df, 
                  mutant_fasta, detection_mode, 
-                 deltaz_threshold, kmer_size,max_hamming_dist,
+                 deltaz_threshold, kmer_size, max_hamming_dist,
                  output_dir, diversity_threshold,
-                 qc_outfile, run_info_file):
+                 qc_outfile, run_info_file, num_cores):
         self.fasta_df = fasta_df
         self.encoded_df = encoded_df
         self.mutant_fasta = mutant_fasta
@@ -43,7 +42,7 @@ class FTM():
         self.hamming_file = "{}/hamming_dist_all.tsv".format(self.output_dir)
         self.count_file = "{}/all_normCounts.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
-        self.num_cores = mp.cpu_count()-3 
+        self.num_cores = num_cores 
         
         # remove before release
         self.div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
