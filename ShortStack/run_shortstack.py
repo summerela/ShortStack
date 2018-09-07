@@ -75,7 +75,8 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
-#import variant_graph as var_graph
+import variant_calling as vars
+import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
@@ -100,19 +101,17 @@ class ShortStack():
                  encoding_table="./base_files/encoding.txt",  
                  kmer_length=6, 
                  qc_threshold=7,
-                 num_cores=4,
-                 detection_mode="rapid",
-                 deltaz_threshold=1,
-                 diversity_threshold=1,
+                 num_cores=6,
+                 diversity_threshold=2,
+                 covg_threshold=2,
                  max_hamming_dist=1):
         
         # gather run options
         self.kmer_length = int(kmer_length)
         self.qc_threshold = int(qc_threshold)
-        self.num_cores= int(psutil.cpu_count() - 5) #leave at least 5 cores
+        self.num_cores= int(psutil.cpu_count() - 3) #leave at least 3 cores
         self.encoding_file = encoding_table
-        self.detection_mode = detection_mode
-        self.deltaz_threshold = int(deltaz_threshold)
+        self.covg_threshold = int(covg_threshold)
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
 
@@ -138,27 +137,35 @@ class ShortStack():
         
         ###Log input config file options
         run_string = ''' \n ShortStack Run: {now}
+        ***Input*** \n
         Input S6 file: {s6} \n
         Target fasta: {fasta} \n
         Encoding table: {colors} \n
         Predefined Mutations: {mutations}\n
         Configuration file: {config} \n
+        
+        ***Parameters*** \n
+        Kmer Length: {kmer_len} \n
+        Min Image QC Score: {qc_thresh} \n
+        Minimum Feature Diversity: {div_thresh} \n
+        Minimum Coverage: {min_cov} \n
+        
+        ***Results*** \n
         Results output to: {output}\n
         Run Info and Warnings output to: {qc_file}\n
         QC Stats output to: {qc_stats}\n
-        Detection Mode: {detection}\n
-        DeltaZ Score Minimum Distance: {deltaz}\n
         '''.format(now=now, s6=self.input_s6,  
                    fasta=self.target_fa, 
                    colors=self.encoding_file, 
                    mutations=self.mutation_vcf,
+                   kmer_len = self.kmer_length,
+                   qc_thresh = self.qc_threshold,
+                   div_thresh = self.diversity_threshold,
                    config=self.config_path, 
                    output=self.output_dir,
                    qc_file = self.run_info_file,
                    qc_stats=self.qc_out_file,
-                   detection=self.detection_mode,
-                   deltaz=int(self.deltaz_threshold),
-                   diversity_threshold=int(self.diversity_threshold))
+                   min_cov=self.covg_threshold)
         
         print(run_string)
         # write run info to wd/output/run_info.txt
@@ -264,18 +271,18 @@ class ShortStack():
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
                               mutant_fasta,
-                              self.detection_mode,
-                              self.deltaz_threshold,
+                              self.covg_threshold,
                               self.kmer_length,
                               self.max_hamming_dist,
                               self.output_dir,
                               self.diversity_threshold,
                               self.qc_out_file,
-                              self.run_info_file
+                              self.run_info_file,
+                              self.num_cores
                               )
         # run FTM
-        ngrams, ftm_df, hamming_df = run_ftm.main()
-        
+        ngrams, counts, ftm = run_ftm.main()
+
         ##########################
         ###   Generate Graph   ###
         ##########################
@@ -318,11 +325,9 @@ if __name__ == "__main__":
                     target_fa=config.get("user_facing_options","target_fa"), 
                     mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
                     encoding_table=config.get("user_facing_options", "encoding_table"),
-                    num_cores=config.get("user_facing_options","num_cores"),
-                    detection_mode=config.get("user_facing_options","detection_mode"),
                     kmer_length=config.get("internal_options","kmer_length"),
+                    covg_threshold=config.get("internal_options","covg_threshold"),
                     qc_threshold=config.get("internal_options","qc_threshold"),
-                    deltaz_threshold=config.get("internal_options", "deltaZ_threshold"),
                     diversity_threshold=config.get("internal_options", "diversity_threshold"),
                     max_hamming_dist=config.get("internal_options", "max_hamming_dist"))
     
