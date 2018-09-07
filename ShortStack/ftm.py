@@ -353,7 +353,7 @@ class FTM():
         ftm = self.return_ftm(norm_counts)
 
         # return ftm matches and diversity filtered non-perfects
-        return ngrams, normalized_counts, ftm
+        return ngrams, norm_counts, ftm
         
 
         

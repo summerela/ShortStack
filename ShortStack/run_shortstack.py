@@ -75,8 +75,8 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
-import variant_calling as vars
-import variant_graph as var_graph
+# import variant_calling as vars
+# import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
@@ -281,7 +281,7 @@ class ShortStack():
                               self.num_cores
                               )
         # run FTM
-        ngrams, counts, ftm = run_ftm.main()
+        ngrams, counts, ftm_df = run_ftm.main()
 
         ##########################
         ###   Generate Graph   ###
@@ -291,10 +291,10 @@ class ShortStack():
         log.info(graph_message)
         
         # instantiate variant graph from variant_graph.py
-        vg = var_graph.VariantGraph(fasta_df,
-                                    hamming_df,
-                                    ftm_df,
-                                    self.kmer_length)
+        # vg = var_graph.VariantGraph(fasta_df,
+        #                             hamming_df,
+        #                             ftm_df,
+        #                             self.kmer_length)
 
 #         vg.main()
         
@@ -326,7 +326,7 @@ if __name__ == "__main__":
                     mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
                     encoding_table=config.get("user_facing_options", "encoding_table"),
                     kmer_length=config.get("internal_options","kmer_length"),
-                    covg_threshold=config.get("internal_options","covg_threshold"),
+                    #covg_threshold=config.get("internal_options","covg_threshold"),
                     qc_threshold=config.get("internal_options","qc_threshold"),
                     diversity_threshold=config.get("internal_options", "diversity_threshold"),
                     max_hamming_dist=config.get("internal_options", "max_hamming_dist"))
