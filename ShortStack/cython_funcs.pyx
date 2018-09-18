@@ -4,6 +4,7 @@ functions in this script use cython to accelerate speed
 
 from itertools import chain
 import re
+import numpy as np
  
 def split_fasta(input_file):
     '''
@@ -13,8 +14,8 @@ def split_fasta(input_file):
     output: lists of headers and sequences that will be passed to 
         parse_input.parse_fasta()
     '''
-    cdef info_list = []
-    cdef seq_list = []
+    cdef list info_list = []
+    cdef list seq_list = []
       
     f = open(input_file, 'r')
 
@@ -69,6 +70,22 @@ def ngrams(str string, int n):
     cdef ngrams = []
     ngrams = zip(*[string[i:] for i in range(n)])
     return [''.join(ngram)for ngram in ngrams]
+
+def calc_symmetricDiff(x):
+    # create list of target sets for all potential targets
+    cdef list targets = []
+    cdef set u = set()
+    
+    #  take the set of each target list for the feature
+    targets = [set(i) for i in x.target_list.values] 
+    
+    # calc intersection
+    u = set.intersection(*targets)
+
+    # symmetric difference = num unique targets in gene - intersection all 
+    symDiff = x.feature_div - len(u)
+
+    return symDiff
 
 def calc_hamming(str a, str b):
     '''

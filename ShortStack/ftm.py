@@ -16,8 +16,9 @@ import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
-import swifter 
-import concurrent.futures as cf
+import swifter
+from numpy import broadcast
+from itertools import count
 
 # import logger
 log = logging.getLogger(__name__)
@@ -38,23 +39,10 @@ class FTM():
         self.output_dir = output_dir
         self.diversity_threshold = diversity_threshold
         self.qc_outfile = qc_outfile
-        self.hamming_file = "{}/hamming_dist_all.tsv".format(self.output_dir)
-        self.count_file = "{}/normCounts.tsv".format(self.output_dir)
+        self.gene_count_file = "{}/perfect_normCounts.tsv".format(self.output_dir)
+        self.ftmQC_filter_file = "{}/ftm_qc_filter.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
-        self.num_cores = num_cores 
-        
-        # remove before release
-        self.div_file = "{}/diversified_hammingDist_all.tsv".format(self.output_dir)
-        
-    def parallelize_dataframe(self, df, func):
-        
-        chunks = round(df.shape[0]/10)
-        df_split = np.array_split(df, chunks)
-        
-        with cf.ProcessPoolExecutor(self.num_cores) as pool:
-            df = pd.concat(pool.map(func, df_split))
-        
-        return df
+        self.num_cores = num_cores
     
     @jit    
     def target_count(self):
@@ -64,7 +52,7 @@ class FTM():
         output: raw_counts.tsv file of raw counts
         '''
         # create output file path for raw counts
-        counts_outfile = "{}/bc_counts.tsv".format(self.output_dir)
+        counts_outfile = "{}/all_target_counts.tsv".format(self.output_dir)
         
         # sort encoded dataframe by featureID
         self.encoded_df.sort_values("FeatureID", inplace=True)
@@ -72,8 +60,8 @@ class FTM():
         feature_counts = self.encoded_df.groupby(["FeatureID", "Target"]).size().reset_index()
         # update columnnames        
         feature_counts.columns = ["FeatureID", "Target", "count"]
+        
         # save raw count to file
-
         feature_counts.to_csv(counts_outfile, sep="\t", index=None)
     
     def create_ngrams(self, input_fasta, input_vcf):
@@ -125,15 +113,19 @@ class FTM():
         
         # rearrange dataframe for saving to file
         matches = pd.DataFrame(matches[['FeatureID', 'gene',
-                                        'target', 'BC', 'Category', 
+                                        'target', 'Category', 
                                         'PoolID', 'Qual', 
                                         'pos']])
-        # add hamming distance for later joins with snv dataframe
         matches["hamming"] = 0
         
-        return matches
-    
-    @jit 
+        # return featureID/target that did not perfectly match
+        self.encoded_df.reset_index(inplace=True)
+        non_matches = self.encoded_df[['FeatureID', 'Target']]\
+            [~self.encoded_df[['FeatureID', 'Target']]\
+             .isin(matches[['FeatureID', 'target']])]
+        
+        return matches, non_matches
+     
     def diversity_filter(self, input_df):
         '''
         purpose: filters out targets for a feature that are below self.diversity_threshold
@@ -141,31 +133,33 @@ class FTM():
         output: diversified dataframe filtered for only targets per feature that meet threshold
         '''
         
-        # group by feature ID and gene
-#         input_df["diverse"] = np.where(input_df.groupby(\
-#             ["FeatureID", "gene"])["pos"].transform('nunique') > self.diversity_threshold, "T", "")
+        # add list of unique targets for each gene
+        input_df["target_list"] = input_df.groupby(["FeatureID", "gene"])["target"]\
+             .transform("unique")
         
-        # count number of unique read positions matched for each FeatureID/gene
-        input_df["feature_div"] = input_df.groupby(\
-            ["FeatureID", "gene"])["pos"].transform('nunique')
-            
-        # filter out FeatureID/gene combos that are below diversity threshold
-        diversified = input_df[input_df.feature_div >= self.diversity_threshold]
+        # count number of unique basecalls matched for each FeatureID/gene
+        input_df["feature_div"] = input_df.target_list.swifter.apply(lambda x: len(x))
+
+        # filter out FeatureID/gene combos that are below feature_div threshold
+        diversified = input_df[input_df.feature_div > self.diversity_threshold]
         diversified.reset_index(inplace=True, drop=True)
-               
-        return diversified
+        
+        # output diversity filtered targets for qc df
+        not_diverse = input_df[input_df.feature_div <= self.diversity_threshold]
+
+        return diversified, not_diverse
 
     @jit
     def locate_multiMapped(self, diversified):
         '''
         purpose: normalize multi-mapped reads as total count in gene/total count all genes
-        input: diversity filtered match dataframe build in align.diversity_filter()
+        input: feature_div filtered match dataframe build in align.diversity_filter()
         output: counts normalized counts dataframe to pass to algin.score_matches()
             raw counts saved to tsv file
         '''
         
         # flag targets that are multi-mapped
-        diversified['multi_mapped'] = np.where(diversified.groupby(["FeatureID", "gene", "BC"]).pos\
+        diversified['multi_mapped'] = np.where(diversified.groupby(["FeatureID", "gene", "target"]).pos\
                                     .transform('nunique') > 1, "T", '')
 
         # separate multi and non multi mapped reads
@@ -187,7 +181,7 @@ class FTM():
         '''
         
         # add counts to multi-mapped reads with normalization 
-        multi["count"] = multi.groupby(["FeatureID", "gene", "BC"])["pos"]\
+        multi["count"] = multi.groupby(["FeatureID", "gene", "target"])["pos"]\
               .transform(lambda x: 1/x.nunique())
               
         return multi
@@ -205,122 +199,144 @@ class FTM():
         counts = pd.concat([multi, non], axis=0) 
         # round counts to two decimal places      
         counts["count"] = counts["count"].round(2)
+
+        # groupby featureID and barcode 
+        bc_counts = counts.copy(deep=True)
+        bc_counts["target_count"] = counts.groupby(['FeatureID', 'target'])['count'].transform("sum")
+
+        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "gene", "target"],
+                                                   keep="first")
+        
+
+        bc_counts.drop(["count", "pos", "Category", "Qual", "PoolID", "target_list"], 
+                       axis=1, inplace=True)
         
         # sort counts for nicer output
-        counts = counts.sort_values(by=["FeatureID", "gene", "target", "pos"], axis=0, ascending=True, inplace=False)
-        counts.reset_index(inplace=True, drop=True)
-
-        # save raw counts to file
-        counts.to_csv(self.count_file, sep="\t", 
+        bc_counts = bc_counts.sort_values(by=["FeatureID", 
+                                        "gene", 
+                                        "target"], 
+                                        axis=0, 
+                                        ascending=True, 
+                                        inplace=False)
+        bc_counts.reset_index(inplace=True, drop=True)
+        counts_outfile = "{}/perfectMatch_bc_counts.tsv".format(self.output_dir)
+        # save basecall normalized counts to file
+        bc_counts.to_csv(counts_outfile, sep="\t", 
                       index=False, 
                       header=True)
         
         # sum counts per gene
-        counts = counts[["FeatureID", "gene", "feature_div", "count"]]
+        counts = counts[["FeatureID", "gene", "hamming", "feature_div", "count", "target_list"]]
         counts["gene_count"] = counts.groupby(['FeatureID', 'gene'])['count'].transform("sum")
-       
-        # keep only relevant columns
+        
+        # keep only relevant columns and drop duplicated featureID/gene combos
         count_df = counts.drop_duplicates(subset=["FeatureID", "gene"],
                                                    keep="first")
         
+        count_df.drop("count", axis=1, inplace=True)
+        
+        # return counts filtered out for coverage to add to qc df
+        below_counts = count_df[count_df.gene_count.astype(int) < self.coverage_threshold]
+
         # filter out featureID/gene combos below covg threshold
-        count_df = count_df[count_df.gene_count >= self.coverage_threshold]
+        count_df = count_df[count_df.gene_count.astype(int) >= self.coverage_threshold]
+
+        # return genes with max counts so we can resolve ties
+        count_df["max_count"] = count_df.groupby("FeatureID")["gene_count"].transform("max")
+        count_df = count_df[count_df.gene_count == count_df.max_count]
+        count_df.drop("max_count", axis=1, inplace=True)
+        count_df.reset_index(drop=True, inplace=True)
         
-        return count_df
-     
+        return count_df, below_counts
+    
+    def find_ties(self, count_df):
+        '''
+        purpose: located features that have tied counts for best FTM call
+        input: count_df created in ftm.finalize_counts.py
+        output: dataframe of ties and non-tied counts_df for passing to return_ftm
+        '''
+        
+        # separate ties to process
+        counts = count_df.groupby('FeatureID').filter(lambda x: len(x)==1)
+        ties = count_df.groupby('FeatureID').filter(lambda x: len(x)> 1)
+
+        return counts, ties
+    
     @jit
-    def return_ftm(self, count_df):
+    def tie_breaker(self, x):
+        '''
+        purpose: uses cython_funcs.calc_symmetricDiff to find unique bc for ties
+            with top 2 feature diversity scores, if one score is 2x or greater, keep
+            else, calculate symmetric difference and keep score with most unique bc's
+        input: tie_df
+        output: used in return_ftm to return ties that pass this filtering logic
+        '''
         
-        ### locate rows with max count ###
-         
-        # create column containing max count 
-        count_df["max_count"] = count_df.groupby(["FeatureID"])["gene_count"].transform("max")
-         
-        # return all rows that match max zscore 
-        max_df = count_df[count_df['gene_count'] == count_df['max_count']]
-        max_df = max_df.drop("max_count", axis=1).reset_index(drop=True)
+        # take top 2 highest sym_diff scores
+        max_feature_divs = x.sort_values('sym_diff', ascending=False).feature_div.head(2).values
+
+        if len(max_feature_divs) > 1:
+            if max_feature_divs[0] >= 2 * max_feature_divs[1]:
+                return x[x.feature_div == max_feature_divs[0]]
+            else:
+                pass  
+        else:
+            return x[x.sym_diff == max_feature_divs[0]]             
+
+    @jit
+    def return_ftm(self, count_df, tie_df):
+        '''
+        purpose: process ties and return final ftm calls
+        input: dataframe of counts and dataframe of ties in coverage
+        output: ftm calls
+        '''
         
-        # seperate ties to process
-        dups = max_df[max_df.FeatureID.duplicated(keep=False)]
-        non = max_df[~max_df.FeatureID.duplicated(keep=False)]
-        
+        # calculate targets unique to each region of interest
+        tie_df["sym_diff"] = tie_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
+
         ### process ties ###
+        broken_ties = tie_df.groupby('FeatureID').apply(self.tie_breaker)
+        if broken_ties.shape[0] > 0:
+            broken_ties.drop("sym_diff", axis=1, inplace=True)
+            broken_ties.reset_index(drop=True, inplace=True)
         
-        # create column containing max diversity 
-        dups["max_div"] = dups.groupby(["FeatureID"])["feature_div"].transform("max")
-         
-        # return all rows that match max diversity 
-        div_df = dups[dups['feature_div'] == dups['max_div']]
+            ftm = pd.concat([count_df, broken_ties], ignore_index=True)
+            
+        else:
+            ftm = count_df
         
-        # drop any duplicated featureID as uncallable
-        div_df.drop_duplicates(subset="FeatureID", keep=False, inplace=True)
-        
-        # remove extraneous columns
-        div_df = div_df.drop(["max_div", "count"], axis=1).reset_index(drop=True) 
-        non = non.drop(["count"], axis=1).reset_index(drop=True)
-       
-        # concat dataframe back together
-        ftm = pd.concat([div_df, non])
-       
         # format ftm df for output to file
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
-        ftm.to_csv(ftm_calls, sep="\t", index=False)
+        ftm.to_csv(ftm_calls, sep="\t", index=False) 
         
-        return ftm
-        
-            
+        return ftm  
     
-#     def calc_Zscore(self, norm_counts):
-#         '''
-#         purpose: calculate zscore between results 
-#         note: zscore calc output identical to scipy.stats.zscore, but numpy is faster
-#         input: filtered, normalized counts dataframe created in align.normalize_counts()
-#         output: df of top2 calls with zscores
-#         '''
-#         
-#         # sum counts per gene
-#         count_df = norm_counts.groupby(['FeatureID', 'gene'])['count'].sum().reset_index()
-#         
-#         # formula for calculating zscore
-# #         zscore = lambda x: (x - np.mean(x)) / np.std(x)
-#         # add zscore for each feature count
-#         count_df["zscore"] = count_df.groupby("FeatureID")["count"].apply(cpy.calc_zscore)
-#         raise SystemExit(count_df.head())
-#         return count_df
-
-#     def return_ftm(self, count_df):
-#     
-#         ### locate rows with max zscore ###
-#         
-#         # create column containing max zscore 
-#         max_z = count_df.groupby(['FeatureID']).agg({'zscore':'max'}).reset_index()
-#         
-#         # merge max zscore column back with original results, many to one
-#         max_df = pd.merge(count_df, max_z, how='left', on=['FeatureID'])
-#         # rename columns 
-#         max_df = max_df.rename(columns={'zscore_x':'zscore', 'zscore_y':'max_z'})
-#         
-#         # return all rows that match max zscore 
-#         max_df = max_df[max_df['zscore'] == max_df['max_z']]
-#         max_df = max_df.drop("max_z", axis=1)
-#         
-#         # remove features with ties
-#         max_df.drop_duplicates(subset="FeatureID", keep=False, inplace=True)
-#         
-#         # calculate cumulative distribution function of the zscore
-#         max_df["cdf"] = max_df["zscore"].swifter.apply(lambda x: stats.norm.cdf(x))
-#         
-#         # format ftm df for output to file
-#         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
-#         max_df.to_csv(ftm_calls, sep="\t", index=False)
-#         
-#         # subset ftm dataframe for memory efficiency to pass to variant graph
-#         ftm_df = max_df[["FeatureID", "gene"]]
-#         ftm_df.columns = ["FeatureID", "FTM_call"]
-#         ftm_df.reset_index(inplace=True, drop=True)
-# 
-#         return ftm_df
-
+    def ftm_qc(self, div_filtered, count_filtered):
+        '''
+        purpose: output information on which bc and targets were filtered
+            during FTM
+        input: diversity and count filtered dataframes built during FTM
+        output: ftm_qc_filter.tsv in output directory
+        '''
+        
+        # parse formatting
+        div_filtered["filter"] = "diversity"
+        count_filtered["filter"] = "counts"
+        count_filtered["target"] = "any"
+        
+        div_filtered.drop([ 'Category', 'PoolID', 'Qual', 'pos', 'target_list'], 
+                          axis=1,
+                          inplace=True)
+        count_filtered.drop(["gene_count", "target_list"], 
+                            axis=1,
+                            inplace=True)
+        ftm_qc = pd.concat([div_filtered, count_filtered], 
+                           ignore_index=True,
+                           sort=False)
+        
+        
+        ftm_qc.to_csv(self.ftmQC_filter_file, sep="\t", index=False)
+    
     def main(self):
         
         # create raw counts file
@@ -333,11 +349,11 @@ class FTM():
         
         # match targets with basecalls
         print("Finding perfectly matched kmers...\n")
-        perfects = self.match_targets(ngrams)
+        perfects, non_matches = self.match_targets(ngrams)
 
-        # filter for feature diversity
+        # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
-        diversified_hamming = self.diversity_filter(perfects)
+        diversified_hamming, diversity_filtered = self.diversity_filter(perfects)
         
         # locate multi-mappped reads
         print("Normalizing counts...\n")
@@ -347,13 +363,22 @@ class FTM():
         multi = self.normalize_multiMapped(multi)
 
         # finalize normalized counts
-        norm_counts = self.finalize_counts(multi, non)
+        print("Finalizing counts....\n")
+        norm_counts, below_cnts = self.finalize_counts(multi, non)
+
+        # find ties to process
+        print("Processing target coverage...\n")
+        count_df, tie_df = self.find_ties(norm_counts)
         
         # return ftm calls
-        ftm = self.return_ftm(norm_counts)
+        print("Generating FTM calls...\n")
+        ftm = self.return_ftm(count_df, tie_df)
+        
+        # save info on reads filtered out for diversity or count threshold
+        self.ftm_qc(diversity_filtered, below_cnts)
 
-        # return ftm matches and diversity filtered non-perfects
-        return ngrams, normalized_counts, ftm
+        # return ftm matches and feature_div filtered non-perfects
+        return ngrams, non_matches, norm_counts, ftm
         
 
         

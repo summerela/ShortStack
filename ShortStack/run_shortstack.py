@@ -69,6 +69,7 @@ import argparse    #parse user arguments
 import pandas as pd
 import numpy as np
 import psutil
+import concurrent.futures as cf
 
 # import shortstack modules
 import parse_input 
@@ -123,7 +124,7 @@ class ShortStack():
         
         # create output dir if not exists
         self.create_outdir(self.output_dir)
-        self.qc_out_file = "{}/qc_metrics.tsv".format(self.output_dir)
+        self.qc_out_file = "{}/imageQC_filtered.tsv".format(self.output_dir)
         self.run_info_file = "{}/run_info.txt".format(self.output_dir)
         self.base_dir = "{rd}/base_files/".format(rd=self.running_dir)
             
@@ -199,6 +200,17 @@ class ShortStack():
         for file in glob.glob("{}/{}".format(dir, pattern)):
             os.remove(file)
             log.info("Removed temp file: {} \n".format(file))
+            
+    @staticmethod
+    def parallelize_dataframe(self, df, func):
+    
+        chunks = round(df.shape[0]/10)
+        df_split = np.array_split(df, chunks)
+        
+        with cf.ProcessPoolExecutor(self.num_cores) as pool:
+            df = pd.concat(pool.map(func, df_split))
+        
+        return df
 
     def main(self):
         '''
@@ -281,20 +293,25 @@ class ShortStack():
                               self.num_cores
                               )
         # run FTM
-        ngrams, counts, ftm = run_ftm.main()
+        ngrams, non_matches, counts, ftm_df = run_ftm.main()
+    
+
+        ###########################
+        ###   Variant Calling   ###
+        ###########################
 
         ##########################
         ###   Generate Graph   ###
         ##########################
-        graph_message = "Creating sequence graph...\n"
-        print(graph_message)
-        log.info(graph_message)
+#         graph_message = "Creating sequence graph...\n"
+#         print(graph_message)
+#         log.info(graph_message)
         
         # instantiate variant graph from variant_graph.py
-        vg = var_graph.VariantGraph(fasta_df,
-                                    hamming_df,
-                                    ftm_df,
-                                    self.kmer_length)
+#         vg = var_graph.VariantGraph(fasta_df,
+#                                     hamming_df,
+#                                     ftm_df,
+#                                     self.kmer_length)
 
 #         vg.main()
         

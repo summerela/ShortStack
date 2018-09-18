@@ -15,6 +15,9 @@ import pyximport; pyximport.install()
 import cython_funcs as cpy
 import ujson
 from numba import jit
+import swifter
+from Bio.GenBank.Record import Feature
+
 
 # import logger
 log = logging.getLogger(__name__)
@@ -32,34 +35,30 @@ class Parse_files():
         self.qc_threshold = int(qc_threshold)
         self.kmer_length = int(kmer_length)
         self.num_cores=num_cores
-      
+        self.qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
+        
+    @jit 
     def file_check(self, input_file):
         '''
         Purpose: check that input file paths exist and are not empty
         input: file path
         output: assertion error if file not found or is empty
         '''
-        try:
-            print("Checking {}".format(input_file))
-            assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0)
-        except AssertionError as e:
-            error_message = "Check that {} exists and is not empty.".format(input_file, e)
-            log.error(error_message)
-            raise SystemExit(error_msg)
-            
+        error_message = "Check that {} exists and is not empty.".format(input_file)
+        print("Checking {}".format(input_file))
+        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
+    
+    @jit        
     def test_cols(self, input_df, df_name, required_cols):
         '''
         purpose: test that required columns are present in an input dataframe
         input: input_df, name of dataframe to use in error message as str, list of required_cols 
         output: assertion error for missing columns
         '''
+        error_message = "Required column not found in {}".format(df_name)
         for x in required_cols:
-            try:
-                assert x in input_df.columns 
-            except AssertionError as e:
-                error_message = "{}\n{} column not found in {}".format(e, x, df_name)
-                log.error(error_message)
-                raise SystemExit(error_msg)  
+            assert x in input_df.columns, error_message
+ 
     
     @jit        
     def read_s6(self):
@@ -74,14 +73,20 @@ class Parse_files():
         # check that file exists and is not empty 
         self.file_check(self.input_s6)
             
-        # read in json with C ultrafast json
         # this function will be parallelized when json file not nested improperly
-        json_data = pd.read_json(self.input_s6)    
-        feature_df = json_normalize(json_data["Features"], record_path=["Cycles","Pools"],
-                                    meta=["FeatureID"])
-            
+        print("Parsing JSON format...\n")
+        json_data = pd.read_json(self.input_s6)
+    
+        return json_data
+    
+    @jit
+    def convert_JSON(self, json_obj):   
+        feature_df = json_normalize(json_obj["Features"], record_path=["Cycles","Pools"],
+                                    meta=["FeatureID"])   
+          
         return feature_df
-               
+    
+    @jit           
     def parse_s6(self, feature_df):
         '''
          purpose: parse input s6 json file
@@ -90,24 +95,23 @@ class Parse_files():
                  qc dataframe with containing reads that were filtered out        
          '''
         print("Parsing S6 file")
-       
-             
+            
         # filter out rows where basecall contains uncalled bases of 0 
         pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
         uncalled_df = feature_df[feature_df.BC.str.contains("0")]
         uncalled_df["filter"] = "UC"
         
         # filter out rows where the Qual score falls below self.qc_threshold
-        qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
-        s6_df = pass_calls[pass_calls.Qual.str.contains(qc_string) == False].reset_index(drop=True)
-        below_qc = feature_df[feature_df.Qual.str.contains(qc_string)]
+        s6_df = pass_calls[pass_calls.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
+        below_qc = feature_df[feature_df.Qual.str.contains(self.qc_string)]
         below_qc["filter"] = "Qual"
          
         # create qc dataframe
         qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
-        
+         
         return s6_df, qc_df
-       
+    
+    @jit   
     def check_s6(self, s6_df):
         '''
         purpose: check that basecalls remain after qc filtering 
@@ -116,12 +120,9 @@ class Parse_files():
         '''
              
         # check that there are calls left after filtering
-        try:
-            assert s6_df.shape[0] > 0
-        except Exception as e:
-            error_msg = "No basecalls passed filtering from S6: \n{}".format(e)
-            log.error(error_msg)
-            raise SystemExit(error_msg)
+        error_msg = "No basecalls passed filtering from S6: \n{}".format(self.input_s6)
+        assert s6_df.shape[0] > 0, error_msg
+       
     @jit                       
     def parse_mutations(self):
         '''
@@ -195,6 +196,7 @@ class Parse_files():
         
         # sort alphabetically by pool for faster matching
         encoding = encoding.sort_values(by=["PoolID", "BC"]).reset_index(drop=True)
+
         return encoding
     
     @jit
@@ -214,7 +216,7 @@ class Parse_files():
         info_list, seq_list = cpy.split_fasta(self.target_fa)
         
         return info_list, seq_list
-    
+
     def parse_fasta(self):
         '''
         purpose: parse input fasta files containing target sequences 
@@ -222,7 +224,7 @@ class Parse_files():
         format: header must have format: id:chrom:start:stop:build
         output: dataframe of sequences and relevant info
         '''
-        
+                
         # split fasta into header and seq
         info_list, seq_list = self.split_fasta()
             
@@ -231,25 +233,21 @@ class Parse_files():
         fasta_df = pd.DataFrame(fasta_list, columns=["info", "seq"])
         
         # break apart header into dataframe columns
-        try:
-            fasta_df["id"],fasta_df["chrom"], \
-            fasta_df["start"],fasta_df["stop"],\
-            fasta_df["build"],fasta_df["strand"] = \
-            list(zip(*fasta_df['info'].apply(lambda x: x.split(":"))))
-        except Exception as e:
-            raise SystemExit("Error: {} \n Ensure your fasta headers are in the format: id:chrom:start:stop:build:strand".format(e))    
+        fasta_df["id"],fasta_df["chrom"], \
+        fasta_df["start"],fasta_df["stop"],\
+        fasta_df["build"],fasta_df["strand"] = list(zip(*fasta_df['info'].swifter.apply(lambda x: x.split(":"))))
+
         fasta_df.drop("info", axis=1, inplace=True)
-        
         # test that the fasta contains information
         assert fasta_df.shape[0] > 0, "FASTA does not contain any information"
         fasta_df["chrom"] = fasta_df["chrom"].str.replace("chrom", '').str.replace("chr", '')
         
         # test that no two mutation ID's are the same
-        assert fasta_df["id"].nunique() == fasta_df.shape[0]
+        assert fasta_df["id"].nunique() == fasta_df.shape[0], "FASTA contains duplicates."
         
         return fasta_df.reset_index(drop=True)
     
-
+    @jit
     def s6FileCheck(self):
         '''
         Purpose: Check if s6 file is .json, otherwise run converter method. 
@@ -271,7 +269,7 @@ class Parse_files():
         output: json s6 file generated in same directory as s6 file. Only generates json based on first FOV in s6 file. 
         '''    
         #Read in CSV
-        if os.path.splitext(self.input_s6)[1] == '.csv':
+        if os.path.splitext(self.input_s6, )[1] == '.csv':
             s6DF = pd.read_csv(self.input_s6)
         elif os.path.splitext(self.input_s6)[1] == '.tsv':
             s6DF = pd.read_table(self.input_s6)
@@ -329,7 +327,8 @@ class Parse_files():
         self.s6FileCheck()
 
         # read in s6 file
-        feature_df = self.read_s6()
+        json_obj = self.read_s6()
+        feature_df = self.convert_JSON(json_obj)
         
         # parse s6 file and return qc_df
         s6_df, qc_df = self.parse_s6(feature_df)
