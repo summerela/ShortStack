@@ -235,21 +235,30 @@ class FTM():
         
         count_df.drop("count", axis=1, inplace=True)
         
-        # return counts filtered out for coverage to add to qc df
-        below_counts = count_df[count_df.gene_count.astype(int) < self.coverage_threshold]
-
         # filter out featureID/gene combos below covg threshold
         count_df = count_df[count_df.gene_count.astype(int) >= self.coverage_threshold]
+        
+        return count_df
+    
+    def filter_counts(self, count_df):
 
-        # return genes with max counts so we can resolve ties
+        # create columns identifying top 2 gene_count scores
         count_df["max_count"] = count_df.groupby("FeatureID")["gene_count"].transform("max")
-        count_df = count_df[count_df.gene_count == count_df.max_count]
-        count_df.drop("max_count", axis=1, inplace=True)
+        count_df["second_max"] = count_df.groupby("FeatureID")["gene_count"].transform(lambda x: x.nlargest(2).min())
+        
+        # return all rows that match the max,2nd gene_count scores
+        count_df = count_df[(count_df.gene_count == count_df.max_count) | (count_df.gene_count == count_df.second_max)]
         count_df.reset_index(drop=True, inplace=True)
         
-        return count_df, below_counts
+        # return counts filtered out for coverage to add to qc df
+        below_counts = count_df[count_df.gene_count.astype(int) < self.coverage_threshold]
+        
+        # filter counts table by coverage threshold
+        counts = count_df[count_df.gene_count.astype(int) >= self.coverage_threshold]
+
+        return counts, below_counts
     
-    def find_ties(self, count_df):
+    def find_multis(self, count_df):
         '''
         purpose: located features that have tied counts for best FTM call
         input: count_df created in ftm.finalize_counts.py
@@ -258,57 +267,122 @@ class FTM():
         
         # separate ties to process
         counts = count_df.groupby('FeatureID').filter(lambda x: len(x)==1)
-        ties = count_df.groupby('FeatureID').filter(lambda x: len(x)> 1)
+        multis = count_df.groupby('FeatureID').filter(lambda x: len(x)> 1)
 
-        return counts, ties
+        return counts, multis
     
     @jit
-    def tie_breaker(self, x):
+    def multi_breaker(self, x):
         '''
         purpose: uses cython_funcs.calc_symmetricDiff to find unique bc for ties
             with top 2 feature diversity scores, if one score is 2x or greater, keep
             else, calculate symmetric difference and keep score with most unique bc's
-        input: tie_df
+        input: multi_df
         output: used in return_ftm to return ties that pass this filtering logic
         '''
         
         # take top 2 highest sym_diff scores
-        max_feature_divs = x.sort_values('sym_diff', ascending=False).feature_div.head(2).values
+        max_symDiff = x.sym_diff.max()
+        
+        # get top two count scores
+        max_count = int(x.max_count.unique())
+        second_max = int(x.second_max.unique())
+        
+        # get top two unique diversity scores
+        max_div =  x.feature_div.nlargest(2).max()
+        second_div = x.feature_div.nlargest(2).min()
 
-        if len(max_feature_divs) > 1:
-            if max_feature_divs[0] >= 2 * max_feature_divs[1]:
-                return x[x.feature_div == max_feature_divs[0]]
+        # if max > 3x coverage, return max
+        if max_count >= (3* second_max):
+            
+            result = x[x.gene_count == max_count]
+           
+            # if more than one result meets criteria, look for diversity 2x >
+            if len(result) > 1:
+                
+                # if one result has 2x > feature diversity, return result
+                if max_div >= (2 * second_div):
+                    result = x[x.feature_div == max_div]
+                    return result
+                
+                # return result with max unique diversity
+                else:
+                    result = x[x.sym_diff == max_symDiff]
+
+                    # if there is still a tie, no call can be made
+                    if len(result) > 1:
+                        pass
+                    else:
+                        return result
+            # if no tie, return result
             else:
-                pass  
+                return result
+        
+        # if no max > 3x covg, check for results with 2x unique feature diversity
+        elif max_div >= (2 * second_div):
+            
+            result = x[x.feature_div == max_div]
+            
+            # if ties, take result with greatest unique feature diversity
+            if len(result) > 1:
+                result = x[x.sym_diff == max_symDiff]
+                
+                # if there is a still a tie, no call can be made
+                if len(result) == 1:
+                    return result
+                else:
+                    pass
+            
+            # return result if no tie here   
+            else:
+                return result       
+        
+        # if no 3x coverage, no 2x unique diversity, return result with highest unique feature div      
         else:
-            return x[x.sym_diff == max_feature_divs[0]]             
+            result = x[x.sym_diff == max_symDiff]
+            
+            # if there is a tie here, no call can be made
+            if len(result) == 1:
+                return result
+            else:
+                pass 
+        
 
     @jit
-    def return_ftm(self, count_df, tie_df):
+    def return_ftm(self, count_df, multi_df):
         '''
-        purpose: process ties and return final ftm calls
-        input: dataframe of counts and dataframe of ties in coverage
+        purpose: process multis and return final ftm calls
+        input: dataframe of top_two coverage and multis
         output: ftm calls
         '''
-        
+                
         # calculate targets unique to each region of interest
-        tie_df["sym_diff"] = tie_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
-
-        ### process ties ###
-        broken_ties = tie_df.groupby('FeatureID').apply(self.tie_breaker)
-        if broken_ties.shape[0] > 0:
-            broken_ties.drop("sym_diff", axis=1, inplace=True)
-            broken_ties.reset_index(drop=True, inplace=True)
+        multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
         
-            ftm = pd.concat([count_df, broken_ties], ignore_index=True)
+        ### process ties ###
+        broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)
+        broken_ties = broken_ties.drop(["max_count", "second_max", "sym_diff"], axis=1)
+        broken_ties.reset_index(drop=True, inplace=True)
+        
+
+        # format count_df for merging with broken_ties
+        count_df = count_df.drop(['max_count', 'second_max'], axis=1)
+        
+        # if ties were broken add results to count_df
+        if broken_ties.shape[0] > 0:
             
+            broken_ties.reset_index(drop=True, inplace=True)
+            ftm = pd.concat([count_df, broken_ties], ignore_index=True)
+        
+        # if no ties broken, just return count_df    
         else:
             ftm = count_df
+            
+        ftm.reset_index(drop=True, inplace=True)
         
         # format ftm df for output to file
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
         ftm.to_csv(ftm_calls, sep="\t", index=False) 
-        
         return ftm  
     
     def ftm_qc(self, div_filtered, count_filtered):
@@ -364,15 +438,18 @@ class FTM():
 
         # finalize normalized counts
         print("Finalizing counts....\n")
-        norm_counts, below_cnts = self.finalize_counts(multi, non)
+        norm_counts = self.finalize_counts(multi, non)
+        
+        # filter counts for 3x coverage
+        norm_counts, below_cnts = self.filter_counts(norm_counts)
 
         # find ties to process
         print("Processing target coverage...\n")
-        count_df, tie_df = self.find_ties(norm_counts)
+        count_df, multi_df = self.find_multis(norm_counts)
         
         # return ftm calls
         print("Generating FTM calls...\n")
-        ftm = self.return_ftm(count_df, tie_df)
+        ftm = self.return_ftm(count_df, multi_df)
         
         # save info on reads filtered out for diversity or count threshold
         self.ftm_qc(diversity_filtered, below_cnts)
