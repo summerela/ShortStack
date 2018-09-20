@@ -14,7 +14,8 @@ detection_mode=rapid
 [internal_options]
 kmer_length=6
 qc_threshold=7
-deltaZ_threshold=2
+max_hamming_dist=1
+covg_threshold=4
 
 ### DO NOT EDIT THIS SECTION ###
 [DEFAULT]
@@ -23,9 +24,7 @@ input_s6=./Input/s6.json
 target_fa=./Input/targets.fa
 mutation_vcf=none
 encoding_table=./base_files/encoding.txt
-num_cores=6
-detection_mode=rapid
 qc_threshold=7
-deltaZ_threshold=0
-diversity_threshold=1
+diversity_threshold=2
 max_hamming_dist=1
+covg_threshold=3
