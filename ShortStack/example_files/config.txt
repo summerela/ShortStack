@@ -8,7 +8,7 @@ output_dir = ./
 input_s6=/home/selasady/ShortStack/ShortStack/example_files/krasNras_S6.csv
 target_fa=/home/selasady/ShortStack/ShortStack/example_files/kras_nras.fa
 encoding_table=/home/selasady/ShortStack/ShortStack/base_files/encoding.txt
-mutation_vcf=/home/selasady/ShortStack/ShortStack/example_files/kras_nras_mutant.vcf
+mutation_vcf=none
 detection_mode=rapid
 
 [internal_options]
