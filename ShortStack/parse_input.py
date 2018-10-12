@@ -96,18 +96,18 @@ class Parse_files():
          '''
         print("Parsing S6 file")
             
-        # filter out rows where basecall contains uncalled bases of 0 
-        pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
-        uncalled_df = feature_df[feature_df.BC.str.contains("0")]
-        uncalled_df["filter"] = "UC"
+#         # filter out rows where basecall contains uncalled bases of 0 
+#         pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
+#         uncalled_df = feature_df[feature_df.BC.str.contains("0")]
+#         uncalled_df["filter"] = "UC"
         
         # filter out rows where the Qual score falls below self.qc_threshold
-        s6_df = pass_calls[pass_calls.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
-        below_qc = feature_df[feature_df.Qual.str.contains(self.qc_string)]
-        below_qc["filter"] = "Qual"
+        s6_df = feature_df[feature_df.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
+        qc_df = feature_df[feature_df.Qual.str.contains(self.qc_string)]
+        qc_df["filter"] = "Qual"
          
-        # create qc dataframe
-        qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
+#         # create qc dataframe
+#         qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
          
         return s6_df, qc_df
     

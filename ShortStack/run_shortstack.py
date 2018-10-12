@@ -76,6 +76,8 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
+import hamming
+import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
@@ -103,7 +105,8 @@ class ShortStack():
                  num_cores=6,
                  diversity_threshold=2,
                  covg_threshold=2,
-                 max_hamming_dist=1):
+                 max_hamming_dist=1,
+                 hamming_weight=1):
         
         # gather run options
         self.kmer_length = int(kmer_length)
@@ -113,6 +116,7 @@ class ShortStack():
         self.covg_threshold = int(covg_threshold)
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
+        self.hamming_weight = int(hamming_weight)
 
         
         # initialize file paths and output dirs
@@ -148,6 +152,8 @@ class ShortStack():
         Min Image QC Score: {qc_thresh} \n
         Minimum Feature Diversity: {div_thresh} \n
         Minimum Coverage: {min_cov} \n
+        Max Hamming Distance: {ham_dist} \n
+        Hamming Weight: {ham_weight}\n
         
         ***Results*** \n
         Results output to: {output}\n
@@ -164,7 +170,9 @@ class ShortStack():
                    output=self.output_dir,
                    qc_file = self.run_info_file,
                    qc_stats=self.qc_out_file,
-                   min_cov=self.covg_threshold)
+                   min_cov=self.covg_threshold,
+                   ham_dist=self.max_hamming_dist,
+                   ham_weight=self.hamming_weight)
         
         print(run_string)
         # write run info to wd/output/run_info.txt
@@ -234,9 +242,9 @@ class ShortStack():
         
         s6_df, qc_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
                 
-        ###################################
-        ####   Encode S6    #####
-        ###################################
+        ########################
+        ####   Encode S6    ####
+        ########################
         log.info("Reads encoded using file:\n {}".format(self.encoding_file))  
         # instantiate encoder class from encoder.py
         encode = encoder.Encode_files(s6_df, encoding_df)
@@ -288,15 +296,11 @@ class ShortStack():
                               self.diversity_threshold,
                               self.qc_out_file,
                               self.run_info_file,
-                              self.num_cores
+                              self.num_cores,
+                              self.hamming_weight
                               )
         # run FTM
-        ngrams, non_matches, counts, ftm_df = run_ftm.main()
-    
-
-        ###########################
-        ###   Variant Calling   ###
-        ###########################
+        ngrams, ftm_df, no_calls = run_ftm.main()
 
         ##########################
         ###   Generate Graph   ###
@@ -344,7 +348,8 @@ if __name__ == "__main__":
                     covg_threshold=config.get("internal_options","covg_threshold"),
                     qc_threshold=config.get("internal_options","qc_threshold"),
                     diversity_threshold=config.get("internal_options", "diversity_threshold"),
-                    max_hamming_dist=config.get("internal_options", "max_hamming_dist"))
+                    max_hamming_dist=config.get("internal_options", "max_hamming_dist"),
+                    hamming_weight=config.get("internal_options", "hamming_weight"))
     
     
         sStack.main()

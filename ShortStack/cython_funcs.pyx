@@ -38,6 +38,7 @@ def process_mutations(input_df):
     input: mutation_df from assemble_mutations
     output: fasta_df of combined reference and alternate sequences for assembly
     '''
+
     # process deletions
     input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
         [seq[0:n] for n, seq in zip((input_df.var_start-input_df.mut_length), input_df.ref_seq)] +  \
@@ -60,6 +61,24 @@ def process_mutations(input_df):
             
     return input_df
 
+def calc_hamming(str a, str b, int maxHD):
+    '''
+    purpose: calculate hamming distance between two strings
+    input: ngrams and targets
+    output: matrix of hamming distances between each target and ref seq ngram
+    '''
+    cdef int l, k
+    c = 0
+    l = len(a)
+    for k from 0 <= k < l:
+        if a[k] != b[k]:
+            if (c < maxHD):
+                c += 1
+            else:
+                c = "X"
+                break
+    return (a,b, c)
+
 def ngrams(str string, int n):
     '''
     purpose: break up input reference sequence into kmers
@@ -72,6 +91,11 @@ def ngrams(str string, int n):
     return [''.join(ngram)for ngram in ngrams]
 
 def calc_symmetricDiff(x):
+    '''
+    purpose: find reads that are unique to a target/feature
+    input: dataframe of perfect matches
+    output: 
+    '''
     # create list of target sets for all potential targets
     cdef list targets = []
     cdef set u = set()
@@ -87,32 +111,3 @@ def calc_symmetricDiff(x):
 
     return symDiff
 
-def calc_hamming(str a, str b):
-    '''
-    purpose: calculate hamming distance between two strings
-    input: ngrams and targets
-    output: matrix of hamming distances between each target and ref seq ngram
-    '''
-    cdef int k, l, c
-    c = 0
-    l = len(a)
-    for k from 0 <= k < l:
-        if a[k] != b[k]:
-            c += 1
-    return c
-
-def match_basecall(str pattern, str seq):
-    '''
-    purpose: compare reference sequence with each basecall
-    to find positions of perfect matches
-    input: basecall, sequence
-    output: list of positions
-    ### NOT USED ##
-    '''
-
-    cdef list matches = []
-    
-    # find positions where target maps to seq 
-    matches = list(chain.from_iterable(map(lambda x: [x.start()]\
-                                 ,re.finditer(pattern, seq))))
-    return matches
