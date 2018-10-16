@@ -199,21 +199,29 @@ class FTM():
 
         # count barcodes for each target per feature 
         bc_counts = counts.copy(deep=True)
-        bc_counts["target_count"] = counts.groupby(['FeatureID', 'Target', 'gene'])["counts"].transform("sum")
-
-        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "gene", "Target"],
+        
+        # sum counts per feature/gene/pos
+        bc_counts["bc_count"] = counts.groupby(['FeatureID', 'Target', 'gene', 'pos'])\
+            ["counts"].transform("sum")
+        
+        # information will be duplicated for each row, drop dups   
+        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "gene", "Target", "pos"],
                                                     keep="first")
-        bc_counts.drop(["counts", "pos"],axis=1, inplace=True)
+        
+        # drop old counts per basecall to keep count per position
+        bc_counts.drop(["counts"],axis=1, inplace=True)
         
         # sort counts for nicer output
         bc_counts = bc_counts.sort_values(by=["FeatureID", 
                                         "gene", 
-                                        "Target"], 
+                                        "Target",
+                                        "pos"], 
                                         axis=0, 
                                         ascending=True, 
                                         inplace=False)
         bc_counts.reset_index(inplace=True, drop=True)
         counts_outfile = "{}/bc_counts.tsv".format(self.output_dir)
+        
         
         # save basecall normalized counts to file
         bc_counts.to_csv(counts_outfile, sep="\t", 
@@ -221,14 +229,18 @@ class FTM():
                       header=True)
         
         # sum counts per gene
-        bc_counts["counts"] = bc_counts.groupby(['FeatureID', 'gene'])['target_count'].transform("sum")
+        count_df = bc_counts.copy(deep=True)
+        count_df["counts"] = count_df.groupby(['FeatureID', 'gene'])['bc_count'].transform("sum")
+        count_df = count_df[["FeatureID", "gene", "feature_div", "counts"]]
         
         # keep only relevant columns and drop duplicated featureID/gene combos
-        count_df = bc_counts.drop_duplicates(subset=["FeatureID", "gene"],
-                                                   keep="first")
+        count_df = count_df.drop_duplicates(subset=["FeatureID", "gene"],
+                                                   keep="first").reset_index(drop=True)
         
-        count_df.drop("target_count", axis=1, inplace=True)
-
+        # filter out featureID/gene combos below covg threshold
+        count_df = count_df[count_df["counts"].astype(int) >= self.coverage_threshold]
+        count_df.reset_index(drop=True, inplace=True) 
+        
         return bc_counts, count_df
 
     def get_top2(self, count_df):
@@ -241,7 +253,7 @@ class FTM():
         # create columns identifying top 2 gene_count scores
         count_df["max_count"] = count_df.groupby("FeatureID")["counts"].transform("max")
         count_df["second_max"] = count_df.groupby("FeatureID")["counts"].transform(lambda x: x.nlargest(2).min())
-        
+
         return count_df
     
     @jit
@@ -263,15 +275,9 @@ class FTM():
         # separate ties to process
         counts = count_df.groupby('FeatureID').filter(lambda x: len(x)==1)
         multis = count_df.groupby('FeatureID').filter(lambda x: len(x)> 1)
-        
-        # filter out featureID/gene combos for non-multies below covg threshold
-        counts = counts[counts["counts"].astype(int) >= self.coverage_threshold]
-        counts = counts.drop(["Target", "max_count", "second_max", "feature_div",
-                              "ref_match", "hamming"], axis=1).reset_index(drop=True)
-        
-        # filter multis for rows where (max_count - second_max = 0)
+
+        # filter multis for (max_count - second_max = 0)
         multis = multis.loc[multis.max_count - multis.second_max > 0]
-        multis.drop(["Target", "ref_match", "hamming"], axis=1, inplace=True)
 
         return counts, multis
     
@@ -361,50 +367,55 @@ class FTM():
         output: ftm calls
         '''
         
-        # add target list to multi_df 
-        target_df = bc_counts[["FeatureID", "gene", "Target"]]
-        # add list of unique targets for each gene
-        target_df["target_list"] = target_df.groupby(["FeatureID", "gene"])["Target"]\
-             .transform("unique")
-        target_df= target_df.drop_duplicates(subset=["FeatureID", "gene"],
-                                                    keep="first")
+        # if there are ties, process them
+        if multi_df.shape[0] > 1:
+            
         
-        # add target lists to multi_df
-        multi_df = multi_df.merge(target_df, on=["FeatureID", "gene"], how="left")
-        
-        # calculate Targets unique to each region of interest
-        multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
-        
-        ### process ties ###
-        broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)        
-        broken_ties = broken_ties.drop(["max_count", "second_max", "sym_diff"], axis=1)
-        broken_ties.reset_index(drop=True, inplace=True)
-        
-        # if ties were broken add results to count_df
-        if broken_ties.shape[0] > 0:
-            broken_ties.drop(["Target", "target_list"], axis=1, inplace=True)
+            # add target list to multi_df 
+            target_df = bc_counts[["FeatureID", "gene", "Target"]]        
+            
+            # add list of unique targets for each gene
+            target_df["target_list"] = target_df.groupby(["FeatureID", "gene"])["Target"]\
+                 .transform("unique")
+            target_df= target_df.drop_duplicates(subset=["FeatureID", "gene"],
+                                                        keep="first")
+            
+            
+            # add target lists to multi_df
+            multi_df = multi_df.merge(target_df, on=["FeatureID", "gene"], how="left")
+            
+            # calculate Targets unique to each region of interest
+            multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
+            
+            ### process ties ###
+            broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)        
+            broken_ties = broken_ties.drop(["max_count", "second_max", "sym_diff"], axis=1)
             broken_ties.reset_index(drop=True, inplace=True)
-            ftm = pd.concat([count_df, broken_ties], ignore_index=True, sort=False)
+            
+            # if ties were broken add results to count_df
+            if broken_ties.shape[0] > 0:
+                broken_ties.drop(["Target", "target_list"], axis=1, inplace=True)
+                broken_ties.reset_index(drop=True, inplace=True)
+                ftm = pd.concat([count_df, broken_ties], ignore_index=True, sort=False)
+            
+            # if no ties broken, just return count_df    
+            else:
+                ftm = count_df
         
-        # if no ties broken, just return count_df    
+        # if not ties, return count_df table
         else:
             ftm = count_df
-        
+            
         # format df
-        ftm.drop("feature_div", axis=1, inplace=True) 
+        ftm.drop(["feature_div", "max_count", "second_max"], axis=1, inplace=True) 
         ftm["counts"] = ftm.counts.astype(float).round(2)
-               
-        # filter out featureID/gene combos below covg threshold
-        ftm = ftm[ftm["counts"].astype(int) >= self.coverage_threshold]
-        ftm.reset_index(drop=True, inplace=True) 
         
         # output ftm to file
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
         ftm.to_csv(ftm_calls, sep="\t", index=False) 
         
-        # format bc_counts for passing to graph
-        bc_counts = bc_counts.drop(["feature_div", "hamming", "counts"], axis=1)
-
+        # format bc_counts for passing to sequencing
+        bc_counts = bc_counts.drop(["feature_div", "hamming", "ref_match"], axis=1)
         return ftm, bc_counts
     
     @jit
@@ -479,10 +490,10 @@ class FTM():
         ftm, bc_counts = self.return_ftm(bc_counts, count_df, multi_df)
         
         # return no_calls
-        no_calls = self.return_calls(ftm, bc_counts)
+        no_calls, ftm_counts = self.return_calls(ftm, bc_counts)
 
         # return ftm matches and feature_div filtered non-perfects
-        return ngrams, ftm_counts, no_calls
+        return ftm_counts, no_calls
         
 
         
