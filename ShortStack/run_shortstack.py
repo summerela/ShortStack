@@ -77,7 +77,6 @@ import encoder
 import parse_mutations as mut
 import ftm
 import hamming
-import variant_graph as var_graph
 
 # modules for align.py
 import scipy.stats as stats
