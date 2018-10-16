@@ -4,19 +4,14 @@ module for parsing input files for shortstack
 '''
 
 import pandas as pd
-import numpy as np
-import re, io, os, sys, logging, inspect,gzip
-from _codecs import encode
-import subprocess as sp
+import re, io, os, logging
 from pandas.io.json import json_normalize
-import multiprocessing as mp
 import allel
 import pyximport; pyximport.install()
 import cython_funcs as cpy
 import ujson
 from numba import jit
 import swifter
-from Bio.GenBank.Record import Feature
 
 
 # import logger

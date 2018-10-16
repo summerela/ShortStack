@@ -35,9 +35,7 @@ python run_shortstack.py -c path/to/config.txt
 #### import packages required to load modules ####
 import logging    # create log file
 import logging.config     # required for seqlog formatting
-import seqlog    # seqlog logger
 import os    # traverse/operations on directories and files
-import subprocess as sp    # submit system calls
 import time    # time/date stamp for log
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
 from logging.handlers import TimedRotatingFileHandler    # set time limit of 31 days on log files
@@ -76,14 +74,8 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
-import hamming
 
-# modules for align.py
-import scipy.stats as stats
-import time
 import pyximport; pyximport.install()
-import cython_funcs as cpy
-from itertools import count
 
 # get path to config file
 parser = argparse.ArgumentParser(description='Run ShortStack program.')
@@ -299,29 +291,17 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-        ngrams, ftm_df, no_calls = run_ftm.main()
+        ftm_df, no_calls = run_ftm.main()
 
-        ##########################
-        ###   Generate Graph   ###
-        ##########################
-#         graph_message = "Creating sequence graph...\n"
-#         print(graph_message)
-#         log.info(graph_message)
-        
-        # instantiate variant graph from variant_graph.py
-#         vg = var_graph.VariantGraph(fasta_df,
-#                                     hamming_df,
-#                                     ftm_df,
-#                                     self.kmer_length)
-
-#         vg.main()
+        ####################
+        ###   Sequence   ###
+        ####################
+       
         
         #########################
         ####   Reporting    #####
         #########################    
-        qc_df.to_csv(self.qc_out_file, header=True, index=True, sep="\t")
-    
-                    
+        qc_df.to_csv(self.qc_out_file, header=True, index=True, sep="\t")                  
 
 if __name__ == "__main__":
     

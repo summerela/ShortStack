@@ -8,16 +8,10 @@ ftm.py
 '''
 
 import logging
-from scipy.spatial import distance
-from scipy import stats
 import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
-import swifter
-from numpy import broadcast
-from itertools import count
-from Bio.GenBank.Record import Feature
 
 # import logger
 log = logging.getLogger(__name__)
@@ -494,6 +488,8 @@ class FTM():
 
         # return ftm matches and feature_div filtered non-perfects
         return ftm_counts, no_calls
+    
+        print("FTM complete...\n")
         
 
         
