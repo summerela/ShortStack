@@ -1,10 +1,9 @@
 '''
 ftm.py
 - compare basecalls with reference sequence to create voting table for FTM
-- bins perfect matches
-- creates voting table and counts perfect matches for FTM
-- returns table of counting stats that is saved to output folder
-- returns voting table from first round of FTM
+- bins perfect matches and hamming distance = self.max_ham_dist matches
+- creates voting table and normalized counts 
+- returns FTM calls
 '''
 
 import logging
@@ -34,8 +33,6 @@ class FTM():
         self.diversity_threshold = diversity_threshold
         self.qc_outfile = qc_outfile
         self.raw_count_file = "{}/rawCounts.tsv".format(self.output_dir)
-        self.gene_count_file = "{}/hd0_normCounts.tsv".format(self.output_dir)
-        self.ftmQC_filter_file = "{}/ftm_qc_filter.tsv".format(self.output_dir)
         self.run_info_file = run_info_file
         self.num_cores = num_cores
         self.hamming_weight = hamming_weight
@@ -93,8 +90,12 @@ class FTM():
          
         hd = lambda x, y: cpy.calc_hamming(x,y, self.max_hamming_dist)
         hamming_list = [hd(x, y) for y in Target_list for x in ngram_list]
-
-        return hamming_list
+        
+        # check that calls were found
+        if len(hamming_list) > 0:
+            return hamming_list
+        else:
+            raise SystemExit("No calls below hamming distance threshold.")
     
     @jit
     def parse_hamming(self, hamming_list,ngram_df):
@@ -132,8 +133,12 @@ class FTM():
         input_df["feature_div"] = input_df.groupby(["FeatureID", "gene"])["Target"].transform("nunique")    
         diversified = input_df[input_df.feature_div > self.diversity_threshold]
         diversified.reset_index(inplace=True, drop=True)
-
-        return diversified
+        
+        # check that calls were found
+        if not diversified.empty:
+            return diversified
+        else:
+            raise SystemExit("No calls above diversity threshold.")
     
     @jit
     def locate_multiMapped(self, diversified):
@@ -153,16 +158,17 @@ class FTM():
         multi = diversified[diversified["multi_mapped"] > 1]\
         
         # non multi mapped reads get a count of 1 each
-        non["counts"] = 1
+        if not non.empty:
+            non["counts"] = 1
+            counts = non
         
         # noramlize multi-mapped reads
-        multi["counts"] = 1/multi.multi_mapped
-        
-        # join count tables back together
-        counts = pd.concat([multi, non], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
+        if not multi.empty:
+            multi["counts"] = 1/multi.multi_mapped
+            counts = pd.concat([counts, multi], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
         
         return counts
-        
+
     @jit    
     def weight_hams(self, counts):
         '''
@@ -225,7 +231,7 @@ class FTM():
         # sum counts per gene
         count_df = bc_counts.copy(deep=True)
         count_df["counts"] = count_df.groupby(['FeatureID', 'gene'])['bc_count'].transform("sum")
-        count_df = count_df[["FeatureID", "gene", "feature_div", "counts"]]
+        count_df = count_df[["FeatureID", "gene", "feature_div", "counts", "hamming"]]
         
         # keep only relevant columns and drop duplicated featureID/gene combos
         count_df = count_df.drop_duplicates(subset=["FeatureID", "gene"],
@@ -239,19 +245,27 @@ class FTM():
 
     def get_top2(self, count_df):
         '''
-        purpose: locate top 2 target counts for each feature
-        input:
-        output: 
+        purpose: locate top 2 target counts for perfect matches
+        input: count_df built in ftm.sum_counts()
+        output: hamming_df= calls within hamming threshold
+            perfect matches with columns denoting max and second max counts
         '''
+        # separate perfect matches and hd1+
+        hamming_df = count_df[count_df.hamming > 0]
+        count_df = count_df[count_df.hamming == 0]
         
         # create columns identifying top 2 gene_count scores
         count_df["max_count"] = count_df.groupby("FeatureID")["counts"].transform("max")
         count_df["second_max"] = count_df.groupby("FeatureID")["counts"].transform(lambda x: x.nlargest(2).min())
-
-        return count_df
+        return count_df, hamming_df
     
     @jit
     def find_tops(self, count_df):
+        '''
+        purpose: retain only top two targets with highest counts
+        input: count_df of perfect matches
+        output: count_df subset to top two matches 
+        '''
         
         # return all rows that match the max,2nd gene_count scores
         count_df = count_df[(count_df.counts == count_df.max_count) | (count_df.counts == count_df.second_max)]
@@ -271,7 +285,8 @@ class FTM():
         multis = count_df.groupby('FeatureID').filter(lambda x: len(x)> 1)
 
         # filter multis for (max_count - second_max = 0)
-        multis = multis.loc[multis.max_count - multis.second_max > 0]
+        if not multis.empty:
+            multis = multis.loc[multis.max_count - multis.second_max > 0]
 
         return counts, multis
     
@@ -352,7 +367,6 @@ class FTM():
             else:
                 pass 
         
-
     @jit
     def return_ftm(self, bc_counts, count_df, multi_df):
         '''
@@ -362,9 +376,8 @@ class FTM():
         '''
         
         # if there are ties, process them
-        if multi_df.shape[0] > 1:
+        if not multi_df.empty:
             
-        
             # add target list to multi_df 
             target_df = bc_counts[["FeatureID", "gene", "Target"]]        
             
@@ -424,16 +437,18 @@ class FTM():
         # get counts for features with no FTM call to pass to de bruijn graph
         no_calls = bc_counts[~bc_counts.FeatureID.isin(ftm_df.FeatureID)]\
             .dropna().reset_index(drop=True)
+            
+        if not no_calls.empty:
            
-        # save no_call info to file
-        no_ftm = no_calls[["FeatureID"]].drop_duplicates()
-        no_ftm_file = "{}/no_ftm_calls.tsv".format(self.output_dir)
-        no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
+            # save no_call info to file
+            no_ftm = no_calls[["FeatureID"]].drop_duplicates()
+            no_ftm_file = "{}/no_ftm_calls.tsv".format(self.output_dir)
+            no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
         
         # add counts to ftm calls for graphing
-        ftm_counts = bc_counts[bc_counts.FeatureID.isin(ftm_df.FeatureID)]\
-            .dropna().reset_index(drop=True)
-            
+        ftm_counts = ftm_df.merge(bc_counts, on=["FeatureID", "gene"])
+        ftm_counts = ftm_counts.drop(["hamming", "counts"], axis=1)
+   
         return no_calls, ftm_counts
     
     def main(self):
@@ -469,9 +484,10 @@ class FTM():
         print("Summing counts....\n")
         bc_counts, norm_counts = self.sum_counts(counts)
 
-        # pull out top 2 counts for each feature
+        # pull out top 2 counts for perfects, separating hd1+
         print("Finding max counts...\n")
-        top2 = self.get_top2(norm_counts)        
+        top2, hamming_df = self.get_top2(norm_counts)  
+      
         # filter top2 genes by coverage threshold
         top_df = self.find_tops(top2)
 
@@ -487,9 +503,7 @@ class FTM():
         no_calls, ftm_counts = self.return_calls(ftm, bc_counts)
 
         # return ftm matches and feature_div filtered non-perfects
-        return ftm_counts, no_calls
-    
-        print("FTM complete...\n")
+        return ftm_counts, no_calls, hamming_df
         
 
         

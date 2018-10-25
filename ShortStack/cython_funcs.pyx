@@ -1,10 +1,6 @@
 '''
 functions in this script use cython to accelerate speed
 '''
-
-from itertools import chain
-import re
-import numpy as np
  
 def split_fasta(input_file):
     '''
