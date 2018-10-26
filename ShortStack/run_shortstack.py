@@ -5,11 +5,15 @@
 Main script to run ShortStack
 
 Dependencies:
-- python 2.7.5
+- python 3.6
 - matplotlib
 - pandas
 - scipy
 - numpy
+- ipywidgets
+- numba
+- swifter
+- cython
 
 Required Input: 
 - s6 file
@@ -74,6 +78,7 @@ import parse_input
 import encoder
 import parse_mutations as mut
 import ftm
+import sequencer as seq
 
 import pyximport; pyximport.install()
 
@@ -268,14 +273,14 @@ class ShortStack():
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-        
+      
         ###############
         ###   FTM   ###
         ###############
         align_message = "Running FTM...\n"
         print(align_message)
         log.info(align_message)
-        
+         
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -291,17 +296,29 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-        ftm_df, no_calls = run_ftm.main()
+        ftm_df, no_calls, hamming_df = run_ftm.main()
 
         ####################
         ###   Sequence   ###
         ####################
-       
+        seq_message = "Determining consensus sequence...\n"
+        print(seq_message)
+        log.info(seq_message)
+        
+        # instantiate sequencing module from sequencer.py
+        sequence = seq.Sequencer(ftm_df,
+                                 no_calls,
+                                 hamming_df,
+                                 fasta_df,
+                                 self.output_dir)
+        
+        
+        sequence.main()
         
         #########################
         ####   Reporting    #####
         #########################    
-        qc_df.to_csv(self.qc_out_file, header=True, index=True, sep="\t")                  
+#         qc_df.to_csv(self.qc_out_file, header=True, index=True, sep="\t")                  
 
 if __name__ == "__main__":
     
@@ -335,9 +352,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(e)
         
-        
-### Funcs for later functionality ##
-
-# skip unknown bases in seqs
-def clean_seq(seq):
-    return "".join([base for base in seq.upper() if base in "ATCG"])

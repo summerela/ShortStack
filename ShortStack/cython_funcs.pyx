@@ -1,10 +1,7 @@
 '''
 functions in this script use cython to accelerate speed
 '''
-
-from itertools import chain
-import re
-import numpy as np
+from ipywidgets.widgets.interaction import _get_min_max_value
  
 def split_fasta(input_file):
     '''
@@ -78,6 +75,41 @@ def calc_hamming(str a, str b, int maxHD):
                 c = "X"
                 break
     return (a,b, c)
+
+def get_consensus(row): 
+    
+    cdef int max_value
+    cdef str nuc
+
+    # find max value for each position
+    max_value = row.max()
+    nuc = row.idxmax()
+
+    # if there is a tie, return N for nocall
+    if (row == max_value).sum() == 1:
+        return nuc
+    else:
+        return "N"
+
+def calc_seq_hamming(str a, str b):
+    '''
+    purpose: calculate hamming distance between two strings
+    input: ngrams and targets
+    output: matrix of hamming distances between each target and ref seq ngram
+    '''
+    cdef int l, k, c
+    c = 0
+    l = len(a)
+    nuc_list = []
+    for k from 0 <= k < l:
+        if a[k] != b[k]:
+            mismatch = "{}:{}:{}".format(b[k],a[k],k)
+            nuc_list.append(mismatch)
+            c += 1
+    
+    if len(nuc_list) == 0:
+        nuc_list= ""
+    return c, nuc_list
 
 def ngrams(str string, int n):
     '''
