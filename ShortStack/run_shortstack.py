@@ -235,9 +235,9 @@ class ShortStack():
                                         self.encoding_file,
                                         self.qc_threshold,
                                         self.num_cores)
-        
+         
         s6_df, qc_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
-                
+      
         ########################
         ####   Encode S6    ####
         ########################
@@ -273,7 +273,7 @@ class ShortStack():
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-      
+       
         ###############
         ###   FTM   ###
         ###############
@@ -296,7 +296,7 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-        ftm_df, no_calls, hamming_df = run_ftm.main()
+#         calls, no_calls = run_ftm.main()
 
         ####################
         ###   Sequence   ###
@@ -305,10 +305,17 @@ class ShortStack():
         print(seq_message)
         log.info(seq_message)
         
+#         calls.to_pickle("./calls")
+#         no_calls.to_pickle("./no_calls")
+#         fasta_df = fasta_df.to_pickle("./fasta_df")
+        
+        no_calls = pd.read_pickle("./no_calls")
+        calls = pd.read_pickle("./calls")
+        fasta_df = pd.read_pickle("./fasta_df")
+ 
+         
         # instantiate sequencing module from sequencer.py
-        sequence = seq.Sequencer(ftm_df,
-                                 no_calls,
-                                 hamming_df,
+        sequence = seq.Sequencer(calls,
                                  fasta_df,
                                  self.output_dir)
         

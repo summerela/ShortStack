@@ -76,21 +76,6 @@ def calc_hamming(str a, str b, int maxHD):
                 break
     return (a,b, c)
 
-def get_consensus(row): 
-    
-    cdef int max_value
-    cdef str nuc
-
-    # find max value for each position
-    max_value = row.max()
-    nuc = row.idxmax()
-
-    # if there is a tie, return N for nocall
-    if (row == max_value).sum() == 1:
-        return nuc
-    else:
-        return "N"
-
 def calc_seq_hamming(str a, str b):
     '''
     purpose: calculate hamming distance between two strings
