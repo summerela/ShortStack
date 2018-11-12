@@ -390,9 +390,13 @@ class FTM():
             # add target lists to multi_df
             multi_df = multi_df.merge(target_df, on=["FeatureID", "gene"], how="left")
             
-            # calculate Targets unique to each region of interest
-            multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
-            
+            # skip group apply if only one multi-mapped barcode found
+            if multi_df.shape[0] != 2:
+                # calculate Targets unique to each region of interest
+                multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
+            else:
+                multi_df["sym_diff"] = cpy.calc_symmetricDiff(multi_df)
+
             ### process ties ###
             broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)        
             broken_ties = broken_ties.drop(["max_count", "second_max", "sym_diff"], axis=1)
