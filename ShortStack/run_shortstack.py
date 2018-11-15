@@ -296,31 +296,22 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-#         calls, no_calls = run_ftm.main()
+        calls, no_calls, hd_df = run_ftm.main()
 
         ####################
         ###   Sequence   ###
         ####################
-        seq_message = "Determining consensus sequence...\n"
-        print(seq_message)
-        log.info(seq_message)
-        
-#         calls.to_pickle("./calls")
-#         no_calls.to_pickle("./no_calls")
-#         fasta_df = fasta_df.to_pickle("./fasta_df")
-        
-        no_calls = pd.read_pickle("./no_calls")
-        calls = pd.read_pickle("./calls")
-        fasta_df = pd.read_pickle("./fasta_df")
- 
-         
-        # instantiate sequencing module from sequencer.py
-        sequence = seq.Sequencer(calls,
-                                 fasta_df,
-                                 self.output_dir)
+#         seq_message = "Determining consensus sequence...\n"
+#         print(seq_message)
+#         log.info(seq_message) 
+#          
+#         # instantiate sequencing module from sequencer.py
+#         sequence = seq.Sequencer(calls,
+#                                  fasta_df,
+#                                  self.output_dir)
         
         
-        sequence.main()
+#         sequence.main()
         
         #########################
         ####   Reporting    #####

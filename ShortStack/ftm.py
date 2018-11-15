@@ -118,8 +118,17 @@ class FTM():
 
         # reorder columns and subset
         hamming_df = hamming_df[["FeatureID", "Target", "gene", "pos", "ref_match", "hamming"]]
+        
+        # separate perfect matches and hd1+
+        hd_df = hamming_df[hamming_df.hamming > 0]
+        count_df = hamming_df[hamming_df.hamming == 0]
+        
+        # save hd_df to file if not empty
+        hd_file = "{}/hamming_matches.tsv".format(self.output_dir)
+        if not hd_df.empty:
+            hd_df.to_csv(hd_file, sep="\t", index=False)
 
-        return hamming_df 
+        return hd_df,  count_df
 
     @jit
     def diversity_filter(self, input_df):
@@ -184,8 +193,6 @@ class FTM():
             ((self.kmer_size - counts.hamming)/self.kmer_size))\
                 * counts.counts
 
-        # round counts to two decimal places      
-        counts["counts"] = counts["counts"].astype(float).round(2)
         return counts
     
     @jit
@@ -196,6 +203,9 @@ class FTM():
         output: dataframe of counts per featureId/gene filtered and
             normalized for perfect matches
         '''
+        
+         # round counts to two decimal places      
+        counts["counts"] = counts["counts"].astype(float).round(2)
 
         # count barcodes for each target per feature 
         bc_counts = counts.copy(deep=True)
@@ -250,10 +260,8 @@ class FTM():
         output: hamming_df= calls within hamming threshold
             perfect matches with columns denoting max and second max counts
         '''
-        # separate perfect matches and hd1+
-        count_df = count_df[count_df.hamming == 0]
 
-        # create columns identifying top 2 gene_count scores
+        # create columns identifying top 2 gene_count scores for perfects
         count_df["max_count"] = count_df.groupby("FeatureID")["counts"].transform("max")
         count_df["second_max"] = count_df.groupby("FeatureID")["counts"].transform(lambda x: x.nlargest(2).min())
         return count_df
@@ -377,21 +385,24 @@ class FTM():
         # if there are ties, process them
         if not multi_df.empty:
             
-            # add target list to multi_df 
-            target_df = bc_counts[["FeatureID", "gene", "Target"]]        
-            
+            # subset to relevant rows and features for speed 
+            target_df = bc_counts[["FeatureID", "gene", "Target"]][bc_counts.FeatureID.isin(multi_df.FeatureID)]        
+
             # add list of unique targets for each gene
             target_df["target_list"] = target_df.groupby(["FeatureID", "gene"])["Target"]\
                  .transform("unique")
             target_df= target_df.drop_duplicates(subset=["FeatureID", "gene"],
                                                         keep="first")
             
+            # convert target list to sets for quick comparison
+            target_df["target_list"] = target_df["target_list"].apply(set)
             
             # add target lists to multi_df
             multi_df = multi_df.merge(target_df, on=["FeatureID", "gene"], how="left")
-            
+
             # calculate Targets unique to each region of interest
-            multi_df["sym_diff"] = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
+            multi_df["sym_diff"] = multi_df.groupby("FeatureID").apply(cpy.calc_symmetricDiff).unstack().reset_index(drop=True)
+            multi_df = multi_df.drop("target_list", axis=1)
             
             ### process ties ###
             broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)        
@@ -399,11 +410,11 @@ class FTM():
             broken_ties.reset_index(drop=True, inplace=True)
             
             # if ties were broken add results to count_df
-            if broken_ties.shape[0] > 0:
-                broken_ties.drop(["Target", "target_list"], axis=1, inplace=True)
+            if not broken_ties.empty:
+                broken_ties.drop(["Target"], axis=1, inplace=True)
                 broken_ties.reset_index(drop=True, inplace=True)
                 ftm = pd.concat([count_df, broken_ties], ignore_index=True, sort=False)
-            
+                
             # if no ties broken, just return count_df    
             else:
                 ftm = count_df
@@ -465,18 +476,18 @@ class FTM():
         
         # parse hamming df and return calls beyond hamming threshold for qc
         print("Parsing the hamming results...\n")
-        hamming_df = self.parse_hamming(hamming_list, ngrams)
+        hamming_df, count_df = self.parse_hamming(hamming_list, ngrams)
       
         # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
-        diversified = self.diversity_filter(hamming_df)
+        diversified = self.diversity_filter(count_df)
 
         # locate multi-mappped reads
         print("Normalizing counts...\n")
         counts = self.locate_multiMapped(diversified)
         
         # weight counts with hamming dist > 0
-        counts = self.weight_hams(counts)
+#         counts = self.weight_hams(counts)
 
         # sum normalized counts
         print("Summing counts....\n")
@@ -485,7 +496,7 @@ class FTM():
         # pull out top 2 counts for perfects, separating hd1+
         print("Finding max counts...\n")
         top2 = self.get_top2(norm_counts)  
-      
+        
         # filter top2 genes by coverage threshold
         top_df = self.find_tops(top2)
 
@@ -498,10 +509,11 @@ class FTM():
         ftm = self.return_ftm(bc_counts, count_df, multi_df)
         
         # return no_calls and df of read for just the ftm called region
+        print("Recording features with no FTM call...\n")
         no_calls, calls = self.return_calls(ftm, bc_counts)
 
         # return ftm matches and feature_div filtered non-perfects
-        return calls, no_calls
+        return calls, no_calls, hamming_df
         
 
         

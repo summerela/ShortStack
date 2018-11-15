@@ -114,12 +114,12 @@ def calc_symmetricDiff(x):
     output: 
     '''
     # create list of target sets for all potential targets
-    cdef list targets = []
-    cdef set u = set()
+    cdef list targets
+    cdef set u 
     
-    #  take the set of each target list for the feature
-    targets = [set(i) for i in x.target_list.values] 
-    
+    #  get a list of target sets for each feature id 
+    targets = list(x.target_list.values)
+
     # calc intersection
     u = set.intersection(*targets)
 
