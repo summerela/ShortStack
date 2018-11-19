@@ -282,16 +282,16 @@ class Parse_files():
         #Establish default Quality/Category metrics
         Qual = "999"
         Category = "000"
-        #Only grabbing first FOV
-        fovcheck = int(s6DF['fov'][0])
+        #Indicating that this is all FOVs
+        fovcheck = "All"
         #Make name of json file
         filename = os.path.splitext(os.path.basename(self.input_s6))[0]
-        jsonname = "FOVID_" + str(fovcheck) + "_" + filename +'.json'
+        jsonname = 'All_FOV_' + filename + '.json'
         jsonfile = os.path.join(os.path.dirname(self.input_s6), jsonname)
         self.input_s6 = jsonfile
         TotalDict = {'FovID':fovcheck,'Features':[]}
-        #Iterate over entries in s6DF, construct dictionary of values for passing to json. Only grabbing first FOV in file.
-        for rowindex, row in enumerate(s6DF.loc[s6DF['fov'] == fovcheck].values):
+        #Iterate over entries in s6DF, construct dictionary of values for passing to json.
+        for rowindex, row in s6DF.iterrows():
             #Grab values for FeatureID, X, Y values
             TotalDict['Features'].append({'FeatureID':row[1],"X":row[3],"Y":row[4],'Cycles':[]})
             #Counter that increases for every cycle seen to index list of cycles 
