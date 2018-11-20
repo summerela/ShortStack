@@ -105,7 +105,6 @@ class Sequencer():
                 axis=1)
                 .stack().tolist(),
             columns=["gene", "pos", "nuc"])
-        
         return fasta_seqs
      
     def check_ref(self, fasta_seqs, count_df):
@@ -177,6 +176,7 @@ class Sequencer():
         # get FTM ID data for pulling out reference seq
         print("Comparing results to reference sequence...\n")
         final_df = self.get_ftmID(self.fasta_df, seq_df)
+        raise SystemExit(final_df)
           
         # validate consensus against ref seq
         print("Validating consensus sequences...\n")

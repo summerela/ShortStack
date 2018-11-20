@@ -374,14 +374,14 @@ class FTM():
             else:
                 pass 
         
-    @jit
+#     @jit
     def return_ftm(self, bc_counts, count_df, multi_df):
         '''
         purpose: process multis, break ties and return final ftm calls
         input: dataframe of basecall counts, counts and multis
         output: ftm calls
         '''
-        
+
         # if there are ties, process them
         if not multi_df.empty:
             
@@ -401,20 +401,30 @@ class FTM():
             multi_df = multi_df.merge(target_df, on=["FeatureID", "gene"], how="left")
 
             # calculate Targets unique to each region of interest
-            multi_df["sym_diff"] = multi_df.groupby("FeatureID").apply(cpy.calc_symmetricDiff).unstack().reset_index(drop=True)
-            multi_df = multi_df.drop("target_list", axis=1)
+            s = multi_df.groupby("FeatureID").apply(cpy.calc_symmetricDiff).reset_index()
+            s.columns = ["FeatureID", "sym_diff"]
             
+            # add symmetrical difference to multi_df
+            sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
+                 for k,v in s.sym_diff.to_dict().items()])
+            sym_df.reset_index(drop=True, inplace=True)
+            
+            multi_df["sym_diff"] = sym_df.sym_diff
+        
             ### process ties ###
-            broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker)        
-            broken_ties = broken_ties.drop(["max_count", "second_max", "sym_diff"], axis=1)
-            broken_ties.reset_index(drop=True, inplace=True)
+            broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker) 
+            
+            # drop count_df extra columns before merging
+            count_df = count_df.drop(["max_count", "second_max"], axis=1)
             
             # if ties were broken add results to count_df
             if not broken_ties.empty:
-                broken_ties.drop(["Target"], axis=1, inplace=True)
+                
+                broken_ties = broken_ties.drop(["max_count", "second_max", "Target",
+                                            "sym_diff", "target_list"], axis=1)
                 broken_ties.reset_index(drop=True, inplace=True)
                 ftm = pd.concat([count_df, broken_ties], ignore_index=True, sort=False)
-                
+                 
             # if no ties broken, just return count_df    
             else:
                 ftm = count_df
@@ -422,15 +432,15 @@ class FTM():
         # if not ties, return count_df table
         else:
             ftm = count_df
-            
+        
         # format df
-        ftm.drop(["feature_div", "max_count", "second_max", "hamming"], axis=1, inplace=True) 
+        ftm.drop(["feature_div", "hamming"], axis=1, inplace=True) 
         ftm["counts"] = ftm.counts.astype(float).round(2)
         
         # output ftm to file
         ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
         ftm.to_csv(ftm_calls, sep="\t", index=False) 
-        
+
         return ftm
     
     @jit

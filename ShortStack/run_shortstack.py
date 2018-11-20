@@ -243,7 +243,7 @@ class ShortStack():
         ########################
         log.info("Reads encoded using file:\n {}".format(self.encoding_file))  
         # instantiate encoder class from encoder.py
-        encode = encoder.Encode_files(s6_df, encoding_df)
+        encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df,  s6_df)
         # add parity check information to qc_df
@@ -304,13 +304,13 @@ class ShortStack():
 #         seq_message = "Determining consensus sequence...\n"
 #         print(seq_message)
 #         log.info(seq_message) 
-#          
+#           
 #         # instantiate sequencing module from sequencer.py
 #         sequence = seq.Sequencer(calls,
 #                                  fasta_df,
 #                                  self.output_dir)
-        
-        
+#         
+#         
 #         sequence.main()
         
         #########################

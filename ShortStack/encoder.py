@@ -11,10 +11,11 @@ pd.options.mode.chained_assignment = None
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df):
+    def __init__(self, s6_df, encoding_df, output_dir):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
+        self.out_dir = output_dir
     
     @jit        
     def map_basecalls(self, s6_df, encoding_df):
@@ -27,6 +28,7 @@ class Encode_files():
         '''
         
         print("Matching basecalls with color encoding")
+        off_file = "{}/off_targets.tsv".format(self.out_dir)
 
         # match targets to base calls by merging s6_df and encoding_df
         encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
@@ -35,9 +37,11 @@ class Encode_files():
         
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        parity_df["filter"] = "bc_parity"
+        parity_df["filter"] = "off_target"
         parity_df.drop("Target", axis=1, inplace=True)
         
+        if not parity_df.empty:
+            parity_df.to_csv(off_file, sep="\t", index=False)
         return encoded_df, parity_df
     
     def remove_invalidBC(self, encoded_df):

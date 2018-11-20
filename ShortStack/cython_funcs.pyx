@@ -119,12 +119,11 @@ def calc_symmetricDiff(x):
     
     #  get a list of target sets for each feature id 
     targets = list(x.target_list.values)
+    
+    result = []
 
-    # calc intersection
-    u = set.intersection(*targets)
+    for set_element in targets:
+        result.append(len(set_element.difference(set.union(*[x for x in targets if x != set_element]))))
 
-    # symmetric difference = num unique targets in gene - intersection all 
-    symDiff = x.feature_div - len(u)
-
-    return symDiff
+    return result
 
