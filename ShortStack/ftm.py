@@ -52,20 +52,13 @@ class FTM():
         # update columnnames        
         feature_counts.columns = ["FeatureID", "Target", "counts"]
     
-    def create_ngrams(self, input_fasta, input_vcf):
+    def create_ngrams(self, fasta_df, input_vcf):
         '''
         purpose: breaks apart reference sequence into self.kmer_length kmers
         input: fasta_df, mutation_df if provided
         output: ngrams dataframe with kmers and associated gene and position on ref
         '''
         
-        # if supervised, add mutants to fasta_df
-        if input_vcf != "":
-            fasta_df = pd.concat([input_fasta, input_vcf], axis=0)
-        # otherwise run FTM without mutants
-        else:
-            fasta_df = input_fasta
-
         # create series of Targets for faster comparison
         seq_series = pd.Series(fasta_df.seq.values, 
                                index=fasta_df.id.values,

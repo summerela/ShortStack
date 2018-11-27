@@ -21,7 +21,7 @@ class Parse_files():
     
     # instance parameters
     def __init__(self, input_s6, output_dir, target_fa, mutation_file, encoder_file, 
-                 qc_threshold=7, kmer_length=6, num_cores=4):
+                 qc_threshold=7, kmer_length=6, num_cores=4, all_fov="true"):
         self.input_s6= input_s6
         self.output_dir = output_dir
         self.target_fa = target_fa
@@ -31,6 +31,7 @@ class Parse_files():
         self.kmer_length = int(kmer_length)
         self.num_cores=num_cores
         self.qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
+        self.all_fov = all_fov
         
     @jit 
     def file_check(self, input_file):
@@ -254,9 +255,71 @@ class Parse_files():
         if os.path.splitext(self.input_s6)[1].lower() != '.json':
             
             print("Converting {} to JSON format.".format(self.input_s6))
-            self.s6_to_json()
+            if self.all_fov == False:
+                self.s6_to_json()
+            else:
+                self.s6_to_json_all()
     
     def s6_to_json(self):
+        '''
+        Purpose: Check if s6 file csv or tsv, convert to json format
+        input: s6 file (full path) in csv or tsv format
+        format: s6 file with Feature/fov/x/y column header. Should be able to handle simulation s6 and imaging file s6 csvs.
+        output: json s6 file generated in same directory as s6 file. Only generates json based on first FOV in s6 file. 
+        '''    
+        #Read in CSV
+        if os.path.splitext(self.input_s6, )[1] == '.csv':
+            s6DF = pd.read_csv(self.input_s6)
+        elif os.path.splitext(self.input_s6)[1] == '.tsv':
+            s6DF = pd.read_table(self.input_s6)
+            
+        #Remove cheeky comma column, if it exists
+        s6DF = s6DF.loc[:,~s6DF.columns.str.contains('^Unnamed')]
+        #Remove whitespace from column headers
+        s6DF.rename(columns=lambda x: x.strip(),inplace = True)
+        #Get list of cycle numbers
+        s6DF.insert(loc=1, column='FeatureID',
+                       value=s6DF['fov'].astype(str) + '_' + s6DF['x'].astype(str) + '_' + s6DF['y'].astype(str))
+        #Only get header values with Cycle/pool information. 
+        Header = s6DF.columns.values.tolist()[5:]
+
+        #Establish default Quality/Category metrics
+        Qual = "999"
+        Category = "000"
+        #Only grabbing first FOV
+        fovcheck = int(s6DF['fov'][0])
+        #Make name of json file
+        filename = os.path.splitext(os.path.basename(self.input_s6))[0]
+        jsonname = "FOVID_" + str(fovcheck) + "_" + filename +'.json'
+        jsonfile = os.path.join(os.path.dirname(self.input_s6), jsonname)
+        self.input_s6 = jsonfile
+        TotalDict = {'FovID':fovcheck,'Features':[]}
+        #Iterate over entries in s6DF, construct dictionary of values for passing to json. Only grabbing first FOV in file.
+        for rowindex, row in enumerate(s6DF.loc[s6DF['fov'] == fovcheck].values):
+            #Grab values for FeatureID, X, Y values
+            TotalDict['Features'].append({'FeatureID':row[1],"X":row[3],"Y":row[4],'Cycles':[]})
+            #Counter that increases for every cycle seen to index list of cycles 
+            cycleCount = -1
+            #Iterate through barcode values to add them to total dictionary
+            for index, BC in enumerate(row[5:]):
+                #Get cycle and pool information from matching index in Header list. 
+                column = Header[index]
+                cycle = int(re.search('C(.*)P', column).group(1))
+                pools = int(column.split('P')[1])
+                #Check if Cycle exists in feature dictionary, if not create cycleID 
+                #and insert BC information. Otherwise, add pool information to existing cycleID.
+                if not any(d.get('CycleID', None) == cycle for d in TotalDict['Features'][rowindex]['Cycles']):
+                    cycleCount += 1
+                    TotalDict['Features'][rowindex]['Cycles'].append({"CycleID":cycle,"Pools":[{"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category}]})
+                else:
+                    TotalDict['Features'][rowindex]['Cycles'][cycleCount]['Pools'].append\
+                    ({"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category})
+
+        # Write JSON file
+        with io.open(jsonfile, 'w', encoding='utf8') as outfile:
+            outfile.write(ujson.dumps(TotalDict,indent = 4))
+        
+    def s6_to_json_all(self):
         '''
         Purpose: Check if s6 file csv or tsv, convert to json format
         input: s6 file (full path) in csv or tsv format

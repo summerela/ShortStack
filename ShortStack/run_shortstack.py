@@ -102,7 +102,8 @@ class ShortStack():
                  diversity_threshold=2,
                  covg_threshold=2,
                  max_hamming_dist=1,
-                 hamming_weight=1):
+                 hamming_weight=1,
+                 all_fov=True):
         
         # gather run options
         self.kmer_length = int(kmer_length)
@@ -113,6 +114,7 @@ class ShortStack():
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
         self.hamming_weight = int(hamming_weight)
+        self.all_fov = all_fov
 
         
         # initialize file paths and output dirs
@@ -234,7 +236,8 @@ class ShortStack():
                                         self.mutation_vcf, 
                                         self.encoding_file,
                                         self.qc_threshold,
-                                        self.num_cores)
+                                        self.num_cores,
+                                        self.all_fov)
          
         s6_df, qc_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
       
@@ -343,7 +346,8 @@ if __name__ == "__main__":
                     qc_threshold=config.get("internal_options","qc_threshold"),
                     diversity_threshold=config.get("internal_options", "diversity_threshold"),
                     max_hamming_dist=config.get("internal_options", "max_hamming_dist"),
-                    hamming_weight=config.get("internal_options", "hamming_weight"))
+                    hamming_weight=config.get("internal_options", "hamming_weight"),
+                    all_fov=config.get("internal_options", "all_fov"))
     
     
         sStack.main()
