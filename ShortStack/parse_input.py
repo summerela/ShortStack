@@ -12,6 +12,7 @@ import cython_funcs as cpy
 import ujson
 from numba import jit
 import swifter
+from Bio.GenBank.Record import Feature
 
 
 # import logger
@@ -78,7 +79,11 @@ class Parse_files():
     @jit
     def convert_JSON(self, json_obj):   
         feature_df = json_normalize(json_obj["Features"], record_path=["Cycles","Pools"],
-                                    meta=["FeatureID"])   
+                                    meta=["FeatureID"])  
+        
+        # save raw call data to file
+        feature_outfile = ""
+        feature_df.to_csv()
           
         return feature_df
     
@@ -92,20 +97,14 @@ class Parse_files():
          '''
         print("Parsing S6 file")
             
-#         # filter out rows where basecall contains uncalled bases of 0 
-#         pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
-#         uncalled_df = feature_df[feature_df.BC.str.contains("0")]
-#         uncalled_df["filter"] = "UC"
+        # filter out rows where basecall contains uncalled bases of 0 
+        pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
+        
         
         # filter out rows where the Qual score falls below self.qc_threshold
         s6_df = feature_df[feature_df.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
-        qc_df = feature_df[feature_df.Qual.str.contains(self.qc_string)]
-        qc_df["filter"] = "Qual"
-         
-#         # create qc dataframe
-#         qc_df = pd.concat([uncalled_df, below_qc], axis=0).reset_index(drop=True)
-         
-        return s6_df, qc_df
+      
+        return s6_df
     
     @jit   
     def check_s6(self, s6_df):
@@ -310,10 +309,10 @@ class Parse_files():
                 #and insert BC information. Otherwise, add pool information to existing cycleID.
                 if not any(d.get('CycleID', None) == cycle for d in TotalDict['Features'][rowindex]['Cycles']):
                     cycleCount += 1
-                    TotalDict['Features'][rowindex]['Cycles'].append({"CycleID":cycle,"Pools":[{"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category}]})
+                    TotalDict['Features'][rowindex]['Cycles'].append({"CycleID":cycle,"Pools":[{"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category, "CycleID":cycle}]})
                 else:
                     TotalDict['Features'][rowindex]['Cycles'][cycleCount]['Pools'].append\
-                    ({"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category})
+                    ({"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category, "CycleID":cycle})
 
         # Write JSON file
         with io.open(jsonfile, 'w', encoding='utf8') as outfile:
@@ -369,10 +368,10 @@ class Parse_files():
                 #and insert BC information. Otherwise, add pool information to existing cycleID.
                 if not any(d.get('CycleID', None) == cycle for d in TotalDict['Features'][rowindex]['Cycles']):
                     cycleCount += 1
-                    TotalDict['Features'][rowindex]['Cycles'].append({"CycleID":cycle,"Pools":[{"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category}]})
+                    TotalDict['Features'][rowindex]['Cycles'].append({"CycleID":cycle,"Pools":[{"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category, "CycleID":cycle}]})
                 else:
                     TotalDict['Features'][rowindex]['Cycles'][cycleCount]['Pools'].append\
-                    ({"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category})
+                    ({"PoolID":pools,'BC':str(BC),'Qual':Qual,"Category":Category, "CycleID":cycle})
 
         # Write JSON file
         with io.open(jsonfile, 'w', encoding='utf8') as outfile:
@@ -389,7 +388,7 @@ class Parse_files():
         feature_df = self.convert_JSON(json_obj)
         
         # parse s6 file and return qc_df
-        s6_df, qc_df = self.parse_s6(feature_df)
+        s6_df = self.parse_s6(feature_df)
         self.check_s6(s6_df)
         
         # parse mutation file if provided
@@ -404,5 +403,5 @@ class Parse_files():
         # parse input fasta file
         fasta_df = self.parse_fasta()
 
-        return s6_df, qc_df, mutation_df, encoding_df, fasta_df
+        return s6_df, mutation_df, encoding_df, fasta_df
             

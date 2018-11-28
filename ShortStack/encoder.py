@@ -26,9 +26,9 @@ class Encode_files():
             encoding_df = encoding df containing target and color_code columns
         Output: s6_df with target seqs instead of color codes
         '''
-        
+
         print("Matching basecalls with color encoding")
-        off_file = "{}/off_targets.tsv".format(self.out_dir)
+        off_file = "{}/invalids.tsv".format(self.out_dir)
 
         # match targets to base calls by merging s6_df and encoding_df
         encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
@@ -37,7 +37,7 @@ class Encode_files():
         
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        parity_df["filter"] = "off_target"
+        parity_df["filter"] = "invalid"
         parity_df.drop("Target", axis=1, inplace=True)
         
         if not parity_df.empty:

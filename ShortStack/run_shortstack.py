@@ -239,7 +239,7 @@ class ShortStack():
                                         self.num_cores,
                                         self.all_fov)
          
-        s6_df, qc_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
+        s6_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
       
         ########################
         ####   Encode S6    ####
@@ -249,11 +249,7 @@ class ShortStack():
         encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df,  s6_df)
-        # add parity check information to qc_df
-        # qc_df comes from parse_input.py
-        # parity_df comes from encoder.py
-        qc_df = pd.concat([qc_df, parity_df], axis=0)
-        qc_df.set_index("FeatureID", inplace=True, drop=True)
+
 
         ###################################
         ####   Assemble Mutations    #####
@@ -316,10 +312,7 @@ class ShortStack():
 #         
 #         sequence.main()
         
-        #########################
-        ####   Reporting    #####
-        #########################    
-#         qc_df.to_csv(self.qc_out_file, header=True, index=True, sep="\t")                  
+
 
 if __name__ == "__main__":
     
