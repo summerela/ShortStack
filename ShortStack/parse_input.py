@@ -82,8 +82,8 @@ class Parse_files():
                                     meta=["FeatureID"])  
         
         # save raw call data to file
-        feature_outfile = ""
-        feature_df.to_csv()
+        feature_outfile = "{}/all_calls.tsv".format(self.output_dir)
+        feature_df.to_csv(feature_outfile, sep="\t", index=False)
           
         return feature_df
     
