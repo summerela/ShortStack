@@ -80,7 +80,7 @@ class Parse_files():
     def convert_JSON(self, json_obj):   
         feature_df = json_normalize(json_obj["Features"], record_path=["Cycles","Pools"],
                                     meta=["FeatureID"])  
-          
+        
         return feature_df
     
     @jit           
@@ -92,10 +92,11 @@ class Parse_files():
                  qc dataframe with containing reads that were filtered out        
          '''
         print("Parsing S6 file")
-            
+    
         # filter out rows where basecall contains uncalled bases of 0 
         pass_calls = feature_df[feature_df.BC.str.contains("0") == False]
-        
+        # filter out rows with missing digits (non 3 spotters)
+        pass_calls = pass_calls[pass_calls.BC.astype(int) > 111111]
         
         # filter out rows where the Qual score falls below self.qc_threshold
         s6_df = pass_calls[pass_calls.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
