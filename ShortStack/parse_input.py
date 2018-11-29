@@ -81,6 +81,7 @@ class Parse_files():
         feature_df = json_normalize(json_obj["Features"], record_path=["Cycles","Pools"],
                                     meta=["FeatureID"])  
         
+        raise SystemExit(feature_df.head())
         # save raw call data to file
         feature_outfile = "{}/all_calls.tsv".format(self.output_dir)
         feature_df.to_csv(feature_outfile, sep="\t", index=False)
@@ -304,6 +305,7 @@ class Parse_files():
                 #Get cycle and pool information from matching index in Header list. 
                 column = Header[index]
                 cycle = int(re.search('C(.*)P', column).group(1))
+                print(cycle)
                 pools = int(column.split('P')[1])
                 #Check if Cycle exists in feature dictionary, if not create cycleID 
                 #and insert BC information. Otherwise, add pool information to existing cycleID.
