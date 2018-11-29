@@ -80,11 +80,6 @@ class Parse_files():
     def convert_JSON(self, json_obj):   
         feature_df = json_normalize(json_obj["Features"], record_path=["Cycles","Pools"],
                                     meta=["FeatureID"])  
-        
-        raise SystemExit(feature_df.head())
-        # save raw call data to file
-        feature_outfile = "{}/all_calls.tsv".format(self.output_dir)
-        feature_df.to_csv(feature_outfile, sep="\t", index=False)
           
         return feature_df
     
@@ -103,8 +98,12 @@ class Parse_files():
         
         
         # filter out rows where the Qual score falls below self.qc_threshold
-        s6_df = feature_df[feature_df.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
-      
+        s6_df = pass_calls[pass_calls.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
+        
+        # save raw call data to file
+        s6_df_outfile = "{}/all3spotters.tsv".format(self.output_dir)
+        s6_df.to_csv(s6_df_outfile, sep="\t", index=False)
+        
         return s6_df
     
     @jit   
