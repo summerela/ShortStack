@@ -52,9 +52,9 @@ http://svn/repos/BIS/tools/ShortStack
     python run_shortstack.py -c path/to/config.txt
 
 ## Output
-- qc_metrcis.tsv: target reads that have been filtered out for containing:
-    - UC – uncalled bases where any position in the 3 spotter contains a 0
-    - QC – where any position in the 3 spotter quality score (fake QC score at this point) below qc_threshold
-- normalized_counts.tsv = counts per feature of each gene/target, normalized for multi-mapping
-- ftm_calls = ftm calls with zscore/deltaZ between top 2
-- run_report.txt – contains file paths to all input files and user options
+By default, all output will be saved to the ./output/ folder. 
+- all3spotters.tsv = s6 file barcodes filtered for non 3spotters and anything with a quality score below the qc_threshold value
+- invalids.tsv = barcodes from all3spotters.tsv that did not match up in the encoding file, indicating the barcode appeared in a pool which it should have have appeared in, or should not have been seen for the entire run
+- hamming_matches.tsv = all valid barcodes that can be matched to any of the input references with a hamming distance below your specified threshold (i.e. HD0, HD1)
+- bc_counts.tsv = hamming matches that are then filtered for your feature diversity threshold and normalized for multi-mapping reads 
+- • After this, the counts are collapsed to the per-gene level, filtered for minimum coverage and then run through your tie-breaking logic if necessary, with the final outputs saved to ftm_calls.tsv
