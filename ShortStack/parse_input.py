@@ -33,17 +33,6 @@ class Parse_files():
         self.num_cores=num_cores
         self.qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
         self.all_fov = all_fov
-        
-    @jit 
-    def file_check(self, input_file):
-        '''
-        Purpose: check that input file paths exist and are not empty
-        input: file path
-        output: assertion error if file not found or is empty
-        '''
-        error_message = "Check that {} exists and is not empty.".format(input_file)
-        print("Checking {}".format(input_file))
-        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
     
     @jit        
     def test_cols(self, input_df, df_name, required_cols):
@@ -66,9 +55,6 @@ class Parse_files():
         '''
         # file handle to input s6.json
         print("Reading in S6 file:{}".format(self.input_s6))
-        
-        # check that file exists and is not empty 
-        self.file_check(self.input_s6)
             
         # this function will be parallelized when json file not nested improperly
         print("Parsing JSON format...\n")
@@ -129,9 +115,6 @@ class Parse_files():
         '''
         print("Parsing mutations file:{}".format(self.mutation_file))
         log.info("Parsing mutations file:{}".format(self.mutation_file))
-        
-        # check that file exists and is not empty 
-        self.file_check(self.mutation_file)
             
         # read in mutation file, truncate to only one mutation per line
         mutation_df = allel.vcf_to_dataframe(self.mutation_file, 
@@ -176,8 +159,6 @@ class Parse_files():
         '''
         print("Reading in encoding file from: {}".format(self.encoder_file))
         log.info("Reading in encoding file from: {}".format(self.encoder_file))
-        # check that file exists and is not empty 
-        self.file_check(self.encoder_file)
 
         required_cols = ["PoolID", "Target", "BC"]
         encoding = pd.read_csv(self.encoder_file, sep="\t", header=0,
@@ -205,8 +186,6 @@ class Parse_files():
     
         print("Parsing fasta file: {}".format(self.target_fa))
         log.info("Parsing fasta file: {}".format(self.target_fa))
-        # check that file exists and is not empty 
-        self.file_check(self.target_fa)
 
         # read in fasta using cython_funcs.split_fasta()
         info_list, seq_list = cpy.split_fasta(self.target_fa)

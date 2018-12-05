@@ -72,6 +72,7 @@ import pandas as pd
 import numpy as np
 import psutil
 import concurrent.futures as cf
+from numba import jit
 
 # import shortstack modules
 import parse_input 
@@ -131,10 +132,12 @@ class ShortStack():
         # gather input file locations
         self.input_s6 = os.path.abspath(input_s6)
         self.target_fa = os.path.abspath(target_fa)
+        
         if mutation_vcf.lower() != "none": 
             self.mutation_vcf = os.path.abspath(mutation_vcf)
         else:
-            self.mutation_vcf = "none"        
+            # temporarily disabling unsupervised mode
+            raise SystemExit("\nUnsupervised mode not yet implemented. Please provide VCF file to continue.\n")      
         
         ###Log input config file options
         run_string = ''' \n ShortStack Run: {now}
@@ -176,7 +179,6 @@ class ShortStack():
         # write run info to wd/output/run_info.txt
         with open(self.run_info_file, "w+") as f:
             f.writelines(run_string)
-       
 
     @staticmethod
     def create_outdir(output_dir):
@@ -215,6 +217,17 @@ class ShortStack():
             df = pd.concat(pool.map(func, df_split))
         
         return df
+    
+    @jit 
+    def file_check(self, input_file):
+        '''
+        Purpose: check that input file paths exist and are not empty
+        input: file path
+        output: assertion error if file not found or is empty
+        '''
+        error_message = "Check that {} exists and is not empty.".format(input_file)
+        print("Checking {}".format(input_file))
+        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
 
     def main(self):
         '''
@@ -225,6 +238,13 @@ class ShortStack():
         - align.py: run first round of FTM
         
         '''
+        
+        # check that file paths are valid
+        self.file_check(self.encoding_file)
+        self.file_check(self.input_s6)
+        self.file_check(self.target_fa)
+        self.file_check(self.mutation_vcf)
+
         
         #########################
         ####   Parse Input   ####
@@ -334,13 +354,13 @@ if __name__ == "__main__":
                     target_fa=config.get("user_facing_options","target_fa"), 
                     mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
                     encoding_table=config.get("user_facing_options", "encoding_table"),
-                    kmer_length=config.get("internal_options","kmer_length"),
-                    covg_threshold=config.get("internal_options","covg_threshold"),
-                    qc_threshold=config.get("internal_options","qc_threshold"),
-                    diversity_threshold=config.get("internal_options", "diversity_threshold"),
-                    max_hamming_dist=config.get("internal_options", "max_hamming_dist"),
-                    hamming_weight=config.get("internal_options", "hamming_weight"),
-                    all_fov=config.get("internal_options", "all_fov"))
+                    kmer_length=config.getint("internal_options","kmer_length"),
+                    covg_threshold=config.getint("internal_options","covg_threshold"),
+                    qc_threshold=config.getint("internal_options","qc_threshold"),
+                    diversity_threshold=config.getint("internal_options", "diversity_threshold"),
+                    max_hamming_dist=config.getint("internal_options", "max_hamming_dist"),
+                    hamming_weight=config.getint("internal_options", "hamming_weight"),
+                    all_fov=config.getboolean("internal_options", "all_fov"))
     
     
         sStack.main()
