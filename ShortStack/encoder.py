@@ -34,7 +34,7 @@ class Encode_files():
         encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
         encoded_df.sort_values(["FeatureID", "Target"], inplace=True)
         encoded_df.reset_index(inplace=True, drop=True)
-        
+
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
         parity_df["filter"] = "invalid"
@@ -42,7 +42,7 @@ class Encode_files():
         
         if not parity_df.empty:
             parity_df.to_csv(off_file, sep="\t", index=False)
-        return encoded_df, parity_df
+        return encoded_df
     
     def remove_invalidBC(self, encoded_df):
         
@@ -58,6 +58,6 @@ class Encode_files():
         return encoded_df
     
     def main(self, s6_df, encoded_df):
-        mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
+        mapped_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df).reset_index(drop=True)
-        return enocoded_df, parity_df
+        return enocoded_df

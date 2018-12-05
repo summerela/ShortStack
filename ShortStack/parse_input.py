@@ -240,7 +240,8 @@ class Parse_files():
         
         # test that no two mutation ID's are the same
         assert fasta_df["id"].nunique() == fasta_df.shape[0], "FASTA contains duplicates."
-        
+        fasta_df["groupID"] = fasta_df["id"]
+
         return fasta_df.reset_index(drop=True)
     
     @jit

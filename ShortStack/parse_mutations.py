@@ -45,7 +45,7 @@ class AssembleMutations():
         # check that mutations are within chrom, start, stop, strand of any ref seq
         query = '''select m_df.chrom, m_df.pos,
             m_df.id as var_id, m_df.ref, m_df.alt,
-            f_df.id as ref_match, m_df.mut_type, m_df.strand,
+            f_df.id as groupID, m_df.mut_type, m_df.strand, 
             f_df.seq as ref_seq, f_df.start as ref_start, f_df.build
             from m_df  
             inner join f_df  
@@ -58,7 +58,7 @@ class AssembleMutations():
         try:
             # pull out mutations that are valid
             # note, pandas query not supporting merge 'where pos between start and stop'
-            valid_mutations = psql.sqldf(query)        
+            valid_mutations = psql.sqldf(query)       
 
             # check that there are any valid mutations
             assert valid_mutations.shape[0] > 0
@@ -100,12 +100,7 @@ class AssembleMutations():
 
         # calculate variant starting position on reference, subtract 1 for 0 based indexing
         valid_mutations["var_start"] = (valid_mutations["pos"].astype(int) - valid_mutations["ref_start"].astype(int)) - 1
-        
-        # check that mutation ref allele matches position on reference
-        npt.assert_array_equal( valid_mutations.swifter.apply(lambda x: x['ref_seq'][x['var_start']], 1),
-                                 valid_mutations.swifter.apply(lambda x: x['ref'][-1], 1), \
-                               "Check that mutations found in vcf are found in ref seq.")
-        raise SystemExit("success")
+         
         # calculate length of mutation
         valid_mutations['mut_length'] = 1 # initialize column with 1 so we don't have to calc snv's
         valid_mutations.mut_length[(valid_mutations['mut_type'] == 'del')] = \
@@ -115,7 +110,7 @@ class AssembleMutations():
         
         # add column to store alternate seq as string
         valid_mutations["alt_seq"] = ""
-                                                                       
+                                                                     
         # create mutated sequences
         valid_mutations = cpy.process_mutations(valid_mutations)
         
@@ -125,10 +120,12 @@ class AssembleMutations():
                       "start":valid_mutations["ref_start"],
                       "stop":(valid_mutations["ref_start"].astype(int) + valid_mutations["mut_length"].astype(int)),
                       "seq":valid_mutations["alt_seq"],
-                      "strand":valid_mutations["strand"]
+                      "strand":valid_mutations["strand"],
+                      "groupID":valid_mutations["groupID"]
                       }
         mutant_fasta = pd.DataFrame(valid_dict, columns=valid_dict.keys()) 
         mutant_fasta.reset_index(drop=True, inplace=True)    
+
         return mutant_fasta
                    
     def main(self):

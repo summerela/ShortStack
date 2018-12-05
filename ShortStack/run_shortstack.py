@@ -248,7 +248,7 @@ class ShortStack():
         # instantiate encoder class from encoder.py
         encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
         # return dataframe of targets found for each molecule   
-        encoded_df, parity_df = encode.main(encoding_df,  s6_df)
+        encoded_df = encode.main(encoding_df,  s6_df)
 
 
         ###################################
@@ -279,7 +279,7 @@ class ShortStack():
         align_message = "Running FTM...\n"
         print(align_message)
         log.info(align_message)
-         
+ 
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
