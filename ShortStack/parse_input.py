@@ -22,15 +22,13 @@ class Parse_files():
     
     # instance parameters
     def __init__(self, input_s6, output_dir, target_fa, mutation_file, encoder_file, 
-                 qc_threshold=7, kmer_length=6, num_cores=4, all_fov="true"):
+                 qc_threshold=7, all_fov="true"):
         self.input_s6= input_s6
         self.output_dir = output_dir
         self.target_fa = target_fa
         self.mutation_file = mutation_file
         self.encoder_file = encoder_file
         self.qc_threshold = int(qc_threshold)
-        self.kmer_length = int(kmer_length)
-        self.num_cores=num_cores
         self.qc_string = "|".join(str(x) for x in range(1,self.qc_threshold))
         self.all_fov = all_fov
     
