@@ -256,7 +256,6 @@ class ShortStack():
                                         self.mutation_vcf, 
                                         self.encoding_file,
                                         self.qc_threshold,
-                                        self.num_cores,
                                         self.all_fov)
          
         s6_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
@@ -320,17 +319,17 @@ class ShortStack():
         ####################
         ###   Sequence   ###
         ####################
-#         seq_message = "Determining consensus sequence...\n"
-#         print(seq_message)
-#         log.info(seq_message) 
-#            
-#         # instantiate sequencing module from sequencer.py
-#         sequence = seq.Sequencer(all_counts,
-#                                  fasta_df,
-#                                  self.output_dir)
-#          
-#          
-#         sequence.main()
+        seq_message = "Determining consensus sequence...\n"
+        print(seq_message)
+        log.info(seq_message) 
+           
+        # instantiate sequencing module from sequencer.py
+        sequence = seq.Sequencer(all_counts,
+                                 fasta_df,
+                                 self.output_dir)
+         
+         
+        sequence.main()
          
 
 
