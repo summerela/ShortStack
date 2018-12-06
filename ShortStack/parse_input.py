@@ -285,7 +285,6 @@ class Parse_files():
                 #Get cycle and pool information from matching index in Header list. 
                 column = Header[index]
                 cycle = int(re.search('C(.*)P', column).group(1))
-                print(cycle)
                 pools = int(column.split('P')[1])
                 #Check if Cycle exists in feature dictionary, if not create cycleID 
                 #and insert BC information. Otherwise, add pool information to existing cycleID.
