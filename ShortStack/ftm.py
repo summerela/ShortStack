@@ -223,7 +223,7 @@ class FTM():
         
         # save new subset copy of perfects for downstream analysis
         bc_counts2 = perfects.copy(deep=True)
-        bc_counts2.drop(["bc_count", "counts"], axis=1, inplace=True)
+        bc_counts2.drop(["counts"], axis=1, inplace=True)
         
         perfects = perfects[["FeatureID", "groupID", "feature_div", "counts", "hamming"]]
         
@@ -435,10 +435,12 @@ class FTM():
     @jit
     def return_calls(self, ftm_df, bc_counts):
         '''
-        purpose: return features and barcodes where no ftm call can be made
+        purpose: save features where no ftm call can be made to a file
+            subset bc_counts to contain only features where an FTM call can be made
         input: ftm_df and encoded_df
         output: no_calls = featureID's and basecalls for features that were not able to 
             be assigned an FTM call to be run through hamming.py
+            perfect_calls = bc_counts of per feature/target counts for ftm called features
         '''
         
         # get counts for features with no FTM call 
@@ -453,10 +455,62 @@ class FTM():
             no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
             
         # pull out only calls related to FTM called region for HD under threshold   
-        calls = ftm_df.merge(bc_counts, on=["FeatureID", "groupID"])
-        calls = calls.drop(["counts", "feature_div"], axis=1)
+        perfect_calls = ftm_df.merge(bc_counts, on=["FeatureID", "groupID"])
+        perfect_calls = perfect_calls.drop(["counts", "feature_div"], axis=1)
+
+        return perfect_calls
+    
+    def return_hammings(self, hamming_df, ftm_df, perfect_calls):
+        '''
+        purpose: locate hd1+ barcodes that match ftm calls and combine with 
+            filtered perfects
+        input: hamming_df containing all hd1+ matches
+            ftm_df: ftm calls 
+        output: all_counts: dataframe containing all HD0 and HD1+ barcodes 
+            for each ftm call
+        '''
+        # get counts for HD1+ FTM call 
+        ftm_df = ftm_df.drop(["counts"], axis=1)
+        hd1_plus = pd.merge(hamming_df, ftm_df, on=['FeatureID', 'groupID'], how='inner')
         
-        return no_calls, calls
+        # locate multi-mapped hd1+ barcodes and add counts
+        normalized = self.locate_multiMapped(hd1_plus)
+        
+         # round counts to two decimal places      
+        normalized["counts"] = normalized["counts"].astype(float).round(2)
+        
+        # sum counts per feature/region/pos
+        normalized["bc_count"] = normalized.groupby(['FeatureID', 'Target', 'groupID', 'pos'])\
+            ["counts"].transform("sum")
+        
+        # information will be duplicated for each row, drop dups   
+        hd_counts = normalized.drop_duplicates(subset=["FeatureID", "gene", "Target", "pos"],
+                                                    keep="first")
+        
+        # drop old counts per basecall to keep count per position
+        hd_counts.drop(["counts", "ref_match"],axis=1, inplace=True)
+        
+        # order dataframes
+        perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "gene", "pos", "hamming", "bc_count"]]
+        hd_counts = hd_counts[["FeatureID", "groupID", "Target", "gene", "pos", "hamming", "bc_count"]]
+
+        # concatenate dataframe
+        all_counts = pd.concat([perfect_calls, hd_counts])
+        
+        all_counts = all_counts.sort_values(by=["FeatureID", 
+                                        "pos",
+                                        "gene", 
+                                        "Target"], 
+                                        axis=0, 
+                                        ascending=True, 
+                                        inplace=False)
+        hd_counts.reset_index(inplace=True, drop=True)
+        
+        counts_file = "{}/all_ftm_counts.tsv".format(self.output_dir)
+        all_counts.to_csv(counts_file, sep="\t", index=False)
+        
+        return all_counts
+        
 
     
     def main(self):
@@ -471,7 +525,7 @@ class FTM():
         
         # parse hamming df and return calls beyond hamming threshold for qc
         print("Parsing the hamming results...\n")
-        hamming_df, perfects = self.parse_hamming(hamming_list, ngrams)
+        hd_plus, perfects = self.parse_hamming(hamming_list, ngrams)
       
         # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
@@ -502,10 +556,14 @@ class FTM():
         
         # return no_calls and df of read for just the ftm called region
         print("Recording features with no FTM call...\n")
-        no_calls, calls = self.return_calls(ftm, bc_counts)
+        perfect_calls = self.return_calls(ftm, bc_counts)
+        
+        # filter hd1+ to only ftm called features and combine with perfects
+        print("Parsing output for sequencing...\n")
+        all_counts = self.return_hammings(hd_plus, ftm, perfect_calls)
 
         # return ftm matches and feature_div filtered non-perfects
-        return calls, no_calls, hamming_df
+        return all_counts
         
 
         

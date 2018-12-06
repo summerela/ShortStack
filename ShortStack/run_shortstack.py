@@ -315,7 +315,7 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-        calls, no_calls, hd_df = run_ftm.main()
+        all_counts = run_ftm.main()
 
         ####################
         ###   Sequence   ###
@@ -323,15 +323,15 @@ class ShortStack():
 #         seq_message = "Determining consensus sequence...\n"
 #         print(seq_message)
 #         log.info(seq_message) 
-#           
+#            
 #         # instantiate sequencing module from sequencer.py
-#         sequence = seq.Sequencer(calls,
+#         sequence = seq.Sequencer(all_counts,
 #                                  fasta_df,
 #                                  self.output_dir)
-#         
-#         
+#          
+#          
 #         sequence.main()
-        
+         
 
 
 if __name__ == "__main__":
