@@ -1,11 +1,10 @@
 # ShortStack
-NanoString ShortStack assembly and variant calling tool for target regions. 
+NanoString ShortStack pipeline for sequencing and variant calling of per molecule short reads.  
 
-Note: This program has only been optimized to run on the freya serever. 
+Note: This program has currently only been optimized to run on the freya serever and the linux platform.  
 
 ## Versions
-### Current
-- 0.1.1 contains only FTM, not complete sequencing and variant calling
+Please [check here](https://github.com/summerela/ShortStack/releases) for latest stable release. 
 
 # Getting Started
 Make sure you have the following files availble: 
@@ -15,14 +14,20 @@ Make sure you have the following files availble:
 - Optional VCF file to create mutation reference sequences if you are searching for a particular set of variants. 
 
 ## Installation
-For internal use, a current version will be maintained on the bioinformatics SVN at: 
-http://svn/repos/BIS/tools/ShortStack
 
-- Copy this directory to whatever server you would like to run ShortStack from. 
-- From the command line where you copied the directory, install the requirements by typing: 
+All installation instructions assume you have already installed a working copy of python. 
 
-     pip3 install -r requirements.txt  
-- You should now be able to run the program from the command line
+### Install from github master branch (stable release, but most likely not the most updatd version)
+To install the lastest development version, from your command line type: 
+
+    pip install git+https://github.com/summerela/ShortStack.git@master --user
+
+### Install from github dev branch (latest updates, not necessarily tested or stable)
+To install the lastest development version, from your command line type: 
+
+    pip install git+https://github.com/summerela/ShortStack.git@dev --user
+
+
 
 ## Required Input: 
 ### s6 file:
