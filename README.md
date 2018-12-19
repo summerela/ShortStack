@@ -1,11 +1,10 @@
 # ShortStack
-NanoString ShortStack assembly and variant calling tool for target regions. 
+NanoString ShortStack pipeline for sequencing and variant calling of per molecule short reads.  
 
-Note: This program has only been optimized to run on the freya serever. 
+Note: This program has currently only been optimized to run on the freya serever and the linux platform.  
 
 ## Versions
-### Current
-- 0.1.1 contains only FTM, not complete sequencing and variant calling
+Please [check here](https://github.com/summerela/ShortStack/releases) for latest stable release. 
 
 # Getting Started
 Make sure you have the following files availble: 
@@ -15,32 +14,49 @@ Make sure you have the following files availble:
 - Optional VCF file to create mutation reference sequences if you are searching for a particular set of variants. 
 
 ## Installation
-For internal use, a current version will be maintained on the bioinformatics SVN at: 
-http://svn/repos/BIS/tools/ShortStack
 
-- Copy this directory to whatever server you would like to run ShortStack from. 
-- From the command line where you copied the directory, install the requirements by typing: 
+All installation instructions assume you have already installed a working copy of python. 
 
-     pip3 install -r requirements.txt  
-- You should now be able to run the program from the command line
+### Windows users ###
+If you are trying to run this on Windows (insert sad face) you may first need to install Visual C++ build tools and add cl.ext to your environmental path variables, as [discussed here](https://stackoverflow.com/questions/41724445/python-pip-on-windows-command-cl-exe-failed/41724634). 
+
+1. [Install Visual C++ build tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2017)
+2. Use the Use the Visual C++ Command Prompt (You can find it in the Start Menu under the Visual Studio folder). Install using pip as detailed below. 
+    
+
+### Install from github master branch 
+- stable release, but most likely not the most updated version
+
+To install the lastest development version, from your command line type: 
+
+
+    pip install git+https://github.com/summerela/ShortStack.git@master --user
+
+### Install from github dev branch 
+- latest updates, not necessarily tested or stable
+
+To install the lastest development version, from your command line type: 
+
+
+    pip install git+https://github.com/summerela/ShortStack.git@dev --user
 
 ## Required Input: 
+### config.txt
+Please see required options [here](https://github.com/summerela/ShortStack/blob/dev/ShortStack/example_files/config.txt)
 ### s6 file:
 - must be in JSON format
 - CSV files will be converted using Joseph Phan's CSV to JSON converter
-### barcode.txt 
+### encoding.txt 
 - TSV format
 - Must contain following columns:
-
-    PoolID  Target  BC
-- PoolID = FOV_x_y coords as Feature ID
-- Target = Target sequence
-- BC = nunberical basecall from imaging
+    - PoolID  Target  BC
+    - PoolID = FOV_x_y coords as Feature ID
+    - Target = Target sequence
+    - BC = nunberical basecall from imaging
 ### target.fa
 - fasta header must be colon delimited
 - header must contain columns as follows: 
-
-    id:chrom:start:stop:build:strand
+     id:chrom:start:stop:build:strand
 - strand should be entered as either "+" or "-"
 
 ## Optional Input:
@@ -52,9 +68,11 @@ http://svn/repos/BIS/tools/ShortStack
     python run_shortstack.py -c path/to/config.txt
 
 ## Output
-By default, all output will be saved to the ./output/ folder. 
-- all3spotters.tsv = s6 file barcodes filtered for non 3spotters and anything with a quality score below the qc_threshold value
-- invalids.tsv = barcodes from all3spotters.tsv that did not match up in the encoding file, indicating the barcode appeared in a pool which it should have have appeared in, or should not have been seen for the entire run
-- hamming_matches.tsv = all valid barcodes that can be matched to any of the input references with a hamming distance below your specified threshold (i.e. HD0, HD1)
-- bc_counts.tsv = hamming matches that are then filtered for your feature diversity threshold and normalized for multi-mapping reads 
-- • After this, the counts are collapsed to the per-gene level, filtered for minimum coverage and then run through your tie-breaking logic if necessary, with the final outputs saved to ftm_calls.tsv
+- All3spotters: All barcode events
+- Bc_counts: Valid HD0s, diversity filtered
+- Invalids: Invalid barcodes (color code doesn’t exist in encoding file)
+- Rawcounts: HD0/higher depending on cutoff
+    - Contains ontargets, offtargets that have a target, cycle/location information
+- No_ftm_calls: Features not called
+- Ftm_calls: Features called, gene, counts
+
