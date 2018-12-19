@@ -8,14 +8,14 @@ output_dir = ./
 input_s6=./examples/krasNras_S6.json
 target_fa=./examples/kras_nras.fa
 encoding_table=./examples/encoding.txt
-#mutation_vcf=./examples/kras_nras_mutant.vcf
+mutation_vcf=./examples/kras_nras_mutant.vcf
 
 [internal_options]
 kmer_length=6
 qc_threshold=7
 max_hamming_dist=1
-covg_threshold=130
-hamming_weight=1
+covg_threshold=4
+diversity_threshold=3
 all_fov=True
 
 ### DO NOT EDIT THIS SECTION ###
