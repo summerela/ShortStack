@@ -5,15 +5,23 @@
 Main script to run ShortStack
 
 Dependencies:
-- python 3.6
-- matplotlib
-- pandas
-- scipy
-- numpy
-- ipywidgets
-- numba
-- swifter
-- cython
+biopython==1.72
+configparser==3.5.0
+Cython==0.28.2
+dask==0.19.1
+ipywidgets==7.4.2
+networkx==2.1
+numba==0.38.1
+numpy==1.14.2
+pandas==0.22.0
+pandasql==0.7.3
+psutil==5.4.6
+scikit-allel==1.1.10
+seqlog==0.3.9
+swifter==0.223
+ujson==1.35
+
+
 
 Required Input: 
 - s6 file
