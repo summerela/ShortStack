@@ -80,6 +80,7 @@ import encoder
 import parse_mutations as mut
 import ftm
 import sequencer as seq
+import consensus as cons
 
 import pyximport; pyximport.install()
 
@@ -244,8 +245,8 @@ class ShortStack():
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
         self.file_check(self.mutation_vcf)
-
-        
+ 
+         
         #########################
         ####   Parse Input   ####
         #########################
@@ -257,9 +258,9 @@ class ShortStack():
                                         self.encoding_file,
                                         self.qc_threshold,
                                         self.all_fov)
-         
+           
         s6_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
-      
+        
         ########################
         ####   Encode S6    ####
         ########################
@@ -268,8 +269,8 @@ class ShortStack():
         encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
         # return dataframe of targets found for each molecule   
         encoded_df = encode.main(encoding_df,  s6_df)
-
-
+  
+  
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -291,14 +292,14 @@ class ShortStack():
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-       
+ 
         ###############
         ###   FTM   ###
         ###############
         align_message = "Running FTM...\n"
         print(align_message)
         log.info(align_message)
- 
+   
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -316,10 +317,14 @@ class ShortStack():
         # run FTM
         all_counts = run_ftm.main()
 
+#         all_counts = pd.read_pickle("./calls")
+#         fasta_df = pd.read_pickle("./fasta_df")
+#         output_dir = "./output"
+
         ####################
         ###   Sequence   ###
         ####################
-        seq_message = "Determining consensus sequence...\n"
+        seq_message = "Determining molecule sequences...\n"
         print(seq_message)
         log.info(seq_message) 
            
@@ -329,7 +334,22 @@ class ShortStack():
                                  self.output_dir)
          
          
-        sequence.main()
+        molecule_seqs = sequence.main()
+        
+        ####################
+        ###   Consensus   ###
+        ####################
+        consensus_message = "Obtaining consensus sequence...\n"
+        print(consensus_message)
+        log.info(consensus_message) 
+           
+        # instantiate sequencing module from sequencer.py
+        consensus = cons.Consensus(molecule_seqs,
+                                 fasta_df,
+                                 output_dir)
+         
+         
+        consensus.main()
          
 
 

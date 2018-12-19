@@ -11,6 +11,7 @@ import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
+from collections import Counter
 
 # import logger
 log = logging.getLogger(__name__)
@@ -42,20 +43,21 @@ class FTM():
         purpose: breaks apart reference sequence into self.kmer_length kmers
         input: fasta_df, mutation_df if provided
         output: ngrams dataframe with kmers and associated gene and position on ref
+            both to region and to each variant/wt
         '''
         
-         # if supervised, add mutants to fasta_df
+        # if supervised, add mutants to fasta_df
         if not input_vcf.empty:
             fasta_df = pd.concat([input_fasta, input_vcf], axis=0, sort=True)
         # otherwise run FTM without mutants
         else:
             fasta_df = input_fasta
-        
+
         # create series of Targets for faster comparison
-        seq_series = pd.Series(fasta_df.seq.values, 
+        seq_series = pd.Series( fasta_df.seq.values, 
                                index=fasta_df.id.values,
                                dtype="object")
-        
+
         # break apart each sequence into ngrams
         ngram_dict = {}
         for gene, seq in seq_series.iteritems():
@@ -65,22 +67,54 @@ class FTM():
         ngrams = pd.DataFrame(pd.concat({k: pd.Series(v) for k, v in ngram_dict.items()})).reset_index()
         ngrams.columns = ["gene", "pos", "ngram"]
         
-        # add group information back to ngram dataframe
-        mini_fasta = fasta_df[["id", "groupID"]]
-        ngrams = ngrams.merge(mini_fasta, left_on="gene", right_on="id")
-        ngrams.drop(["id"], axis=1, inplace=True)
+        # save all ngrams to file for easy mapping later in case we need it
+        ngrams_out = "{}/all_ngrams.tsv".format(self.output_dir)
+        ngrams.to_csv(ngrams_out, sep="\t", index=False)
 
+        # get group information back from fasta_df
+        ngrams = ngrams.merge(fasta_df[["id", "groupID"]], 
+                             left_on="gene", 
+                             right_on="id")
+        
+        ngrams_unique = ngrams.drop("id", axis=1)
+
+        # combine unique kmers for region into group_ngrams
+        group_ngrams = ngrams.groupby(['groupID', 'pos'])["ngram"].unique().reset_index()
+
+        return ngrams_unique, group_ngrams
+    
+    def reshape_ngrams(self, df):
+        '''
+        purpose: flatten list of ngrams for each reference into dataframe
+        input: group_ngrams list from ftm.create_ngrams()
+        output: ngrams dataframe to region
+        '''
+        
+        # specify column containing list
+        list_col = 'ngram'
+
+        # flatten listed column and repeate related info from other columns
+        ngrams = pd.DataFrame({
+              col:np.repeat(df[col].values, df[list_col].str.len())
+              for col in df.columns.drop(list_col)}
+            ).assign(**{list_col:np.concatenate(df[list_col].values)})[df.columns]
+  
         return ngrams
        
     def match_Targets(self, ngram_df):
-        
+        '''
+        purpose: match ngrams to targets 
+        input: ngram_df craeted in ftm.parse_ngrams()
+        output: hamming_list of tuples (ref, target match, hamming distance)
+        '''
+
         # get unique set from each list
-        ngram_list = list(set(ngram_df.ngram))
+        ngram_list = list(set(ngram_df.ngram.values))
         Target_list = list(set(self.encoded_df.Target))
          
         hd = lambda x, y: cpy.calc_hamming(x,y, self.max_hamming_dist)
         hamming_list = [hd(x, y) for y in Target_list for x in ngram_list]
-        
+   
         # check that calls were found
         if len(hamming_list) < 1:
             raise SystemExit("No calls below hamming distance threshold.")
@@ -89,7 +123,7 @@ class FTM():
             
     
     @jit
-    def parse_hamming(self, hamming_list,ngram_df):
+    def parse_hamming(self, hamming_list,group_ngram, variant_ngrams):
         '''
         purpose: combine hamming distance information with feature level data
         input: hamming_list: created in match_targets(), list of all ngrams, basecalls and hd
@@ -105,24 +139,27 @@ class FTM():
         assert not hamming_df.empty, "No matches were found below hamming distance threshold."
 
         # match ngrams to their matching Target regions
-        hamming_df = hamming_df.merge(ngram_df, left_on="ref_match", right_on="ngram").reset_index(drop=True)
+        hamming_df = hamming_df.merge(group_ngram, left_on="ref_match", 
+                                      right_on="ngram").reset_index(drop=True)
         
         # match basecalls to their matching features
-        hamming_df = hamming_df.merge(self.encoded_df, left_on="bc_feature", right_on="Target").reset_index(drop=True)
+        hamming_df = hamming_df.merge(self.encoded_df, left_on="bc_feature", 
+                                      right_on="Target").reset_index(drop=True)
         
-        # sort values for nicer output
-        hamming_df = hamming_df.sort_values(["FeatureID", "Target", "pos"])
+        # sort values for nicer output and drop duplicates
+        hamming_df = hamming_df.sort_values(["FeatureID", "groupID", "Target", "pos"])
+        hamming_df.drop_duplicates(inplace=True)
 
         # save raw hamming counts to file
         hamming_df.to_csv(self.raw_count_file , sep="\t", index=None)
 
         # reorder columns and subset
-        hamming_df = hamming_df[["FeatureID", "Target", "gene", "pos", "ref_match", "hamming", "groupID"]]
+        hamming_df = hamming_df[["FeatureID", "Target", "groupID", "pos", "ref_match", "hamming"]]
         
         # separate perfect matches and hd1+
-        hd_plus = hamming_df[hamming_df.hamming > 0]
-        perfects = hamming_df[hamming_df.hamming == 0]
-
+        hd_plus = hamming_df[hamming_df.hamming > 0].reset_index(drop=True)
+        perfects = hamming_df[hamming_df.hamming == 0].reset_index(drop=True)
+        
         return hd_plus, perfects
 
     @jit
@@ -194,7 +231,7 @@ class FTM():
             ["counts"].transform("sum")
         
         # information will be duplicated for each row, drop dups   
-        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "gene", "Target", "pos"],
+        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
                                                     keep="first")
         
         # drop old counts per basecall to keep count per position
@@ -202,7 +239,7 @@ class FTM():
         
         # sort counts for nicer output
         bc_counts = bc_counts.sort_values(by=["FeatureID", 
-                                        "gene", 
+                                        "groupID", 
                                         "Target",
                                         "pos"], 
                                         axis=0, 
@@ -234,6 +271,7 @@ class FTM():
         # filter out featureID/gene combos below covg threshold
         perfects = perfects[perfects["counts"].astype(int) >= self.coverage_threshold]
         perfects.reset_index(drop=True, inplace=True) 
+        assert len(perfects) != 0, "No matches found above coverage threshold." 
         
         return bc_counts2, perfects
 
@@ -248,7 +286,7 @@ class FTM():
         # create columns identifying top 2 gene_count scores for perfects
         perfects["max_count"] = perfects.groupby("FeatureID")["counts"].transform("max")
         perfects["second_max"] = perfects.groupby("FeatureID")["counts"].transform(lambda x: x.nlargest(2).min())
-
+        
         return perfects
     
     @jit
@@ -265,22 +303,21 @@ class FTM():
 
         return perfects
     
-    def find_multis(self, perfects):
+    def find_ties(self, perfects):
         '''
         purpose: located features that have tied counts for best FTM call
         input: perfects created in ftm.sum_counts.py
         output: dataframe of ties and non-tied counts for passing to return_ftm
         '''
         
-        # separate ties to process
-        counts = perfects.groupby('FeatureID').filter(lambda x: len(x)==1)
+        # pull out features that have ties for first or second place
+        no_ties = perfects.groupby('FeatureID').filter(lambda x: len(x)==1)
         multis = perfects.groupby('FeatureID').filter(lambda x: len(x)> 1)
 
         # filter multis for (max_count - second_max = 0)
-        if not multis.empty:
-            multis = multis.loc[multis.max_count - multis.second_max > 0]
+        multis = perfects.loc[perfects.max_count - multis.second_max > 0]
 
-        return counts, multis
+        return no_ties, multis
     
     @jit
     def multi_breaker(self, x):
@@ -358,16 +395,22 @@ class FTM():
                 return result
             else:
                 pass 
+
+    def unique_count(self, sets):
+        count = Counter()
+        for s in sets:
+            count.update(s)
+        return [sum(count[x] == 1 for x in s) for s in sets]
         
 #     @jit
-    def return_ftm(self, bc_counts, perfects, multi_df):
+    def return_ftm(self, bc_counts, no_ties, multi_df):
         '''
         purpose: process multis, break ties and return final ftm calls
         input: dataframe of basecall counts, counts and multis
         output: ftm calls
         '''
 
-        # if there are ties, process them
+        # if there are multis, process them
         if not multi_df.empty:
             
             # subset to relevant rows and features for speed 
@@ -386,7 +429,7 @@ class FTM():
             multi_df = multi_df.merge(target_df, on=["FeatureID", "groupID"], how="left")
 
             # calculate Targets unique to each region of interest
-            s = multi_df.groupby("FeatureID").apply(cpy.calc_symmetricDiff).reset_index()
+            s = multi_df.groupby("FeatureID").apply(self.unique_count).reset_index()
             s.columns = ["FeatureID", "sym_diff"]
             
             # add symmetrical difference to multi_df
@@ -395,31 +438,39 @@ class FTM():
             sym_df.reset_index(drop=True, inplace=True)
             
             multi_df["sym_diff"] = sym_df.sym_diff
+            
         
             ### process ties ###
             broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker) 
             
-            # drop perfects extra columns before merging
-            perfects = perfects.drop(["max_count", "second_max"], axis=1)
+            # drop no_ties extra columns before merging
+            no_ties = no_ties.drop(["max_count", "second_max"], axis=1)
             
-            # if ties were broken add results to perfects
+            # if ties were broken add results to no_ties
             if not broken_ties.empty:
                 
                 broken_ties = broken_ties.drop(["max_count", "second_max", "Target",
                                             "sym_diff", "target_list"], axis=1)
                 broken_ties.reset_index(drop=True, inplace=True)
-                ftm = pd.concat([perfects, broken_ties], ignore_index=True, sort=False)
-                 
-            # if no ties broken, just return perfects    
+                
+                # combine with any no-ties
+                if not no_ties.empty:
+                    ftm = pd.concat([no_ties, broken_ties], ignore_index=True, sort=False)
+                else:
+                    ftm = broken_ties
+            
+            # if no ties broken, just return no_ties    
             else:
-                ftm = perfects
+                ftm = no_ties
         
-        # if not ties, return perfects table
+        # if no multis, return no_ties table
         else:
-            ftm = perfects
-            ftm = ftm.drop(["max_count", "second_max"], axis=1)
+            ftm = no_ties
+            if not ftm.empty:
+                ftm = ftm.drop(["max_count", "second_max"], axis=1)
 
         if not ftm.empty:
+
             # format df
             ftm.drop(["feature_div", "hamming"], axis=1, inplace=True) 
             ftm["counts"] = ftm.counts.astype(float).round(2)
@@ -455,12 +506,12 @@ class FTM():
             no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
             
         # pull out only calls related to FTM called region for HD under threshold   
-        perfect_calls = ftm_df.merge(bc_counts, on=["FeatureID", "groupID"])
-        perfect_calls = perfect_calls.drop(["counts", "feature_div"], axis=1)
+        calls = ftm_df.merge(bc_counts, on=["FeatureID", "groupID"])
+        calls = calls.drop(["counts", "feature_div"], axis=1)
 
-        return perfect_calls
+        return calls
     
-    def return_hammings(self, hamming_df, ftm_df, perfect_calls):
+    def return_all_calls(self, hamming_df, ftm_df, perfect_calls):
         '''
         purpose: locate hd1+ barcodes that match ftm calls and combine with 
             filtered perfects
@@ -484,27 +535,27 @@ class FTM():
             ["counts"].transform("sum")
         
         # information will be duplicated for each row, drop dups   
-        hd_counts = normalized.drop_duplicates(subset=["FeatureID", "gene", "Target", "pos"],
+        hd_counts = normalized.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
                                                     keep="first")
         
         # drop old counts per basecall to keep count per position
         hd_counts.drop(["counts", "ref_match"],axis=1, inplace=True)
         
         # order dataframes
-        perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "gene", "pos", "hamming", "bc_count"]]
-        hd_counts = hd_counts[["FeatureID", "groupID", "Target", "gene", "pos", "hamming", "bc_count"]]
+        perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
+        hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
 
         # concatenate dataframe
         all_counts = pd.concat([perfect_calls, hd_counts])
         
         all_counts = all_counts.sort_values(by=["FeatureID", 
                                         "pos",
-                                        "gene", 
+                                        "groupID", 
                                         "Target"], 
                                         axis=0, 
                                         ascending=True, 
                                         inplace=False)
-        hd_counts.reset_index(inplace=True, drop=True)
+        all_counts.reset_index(inplace=True, drop=True)
         
         counts_file = "{}/all_ftm_counts.tsv".format(self.output_dir)
         all_counts.to_csv(counts_file, sep="\t", index=False)
@@ -517,7 +568,10 @@ class FTM():
         
         # break reference seq into kmers
         print("Breaking up reference sequence into kmers...\n")
-        ngrams = self.create_ngrams(self.fasta_df, self.mutant_fasta)        
+        ngrams_unique, ngrams_group = self.create_ngrams(self.fasta_df, self.mutant_fasta)   
+        
+        # reshape ngrams into dataframe for matching
+        ngrams = self.reshape_ngrams(ngrams_group)     
         
         # match Targets with basecalls
         print("Locating basecalls within hamming distance threshold...\n")
@@ -525,7 +579,7 @@ class FTM():
         
         # parse hamming df and return calls beyond hamming threshold for qc
         print("Parsing the hamming results...\n")
-        hd_plus, perfects = self.parse_hamming(hamming_list, ngrams)
+        hd_plus, perfects = self.parse_hamming(hamming_list, ngrams, ngrams_unique)
       
         # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
@@ -548,7 +602,7 @@ class FTM():
 
         # find ties to process
         print("Processing Target coverage...\n")
-        perfects, multi_df = self.find_multis(top_df)
+        perfects, multi_df = self.find_ties(top_df)
         
         # return ftm calls
         print("Generating FTM calls...\n")
@@ -560,7 +614,7 @@ class FTM():
         
         # filter hd1+ to only ftm called features and combine with perfects
         print("Parsing output for sequencing...\n")
-        all_counts = self.return_hammings(hd_plus, ftm, perfect_calls)
+        all_counts = self.return_all_calls(hd_plus, ftm, perfect_calls)
 
         # return ftm matches and feature_div filtered non-perfects
         return all_counts

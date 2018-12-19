@@ -15,6 +15,7 @@ import numpy.testing as npt
 import pyximport; pyximport.install()
 import cython_funcs as cpy
 import swifter
+from numba import jit
 
 # import logger
 log = logging.getLogger(__name__)
@@ -22,8 +23,8 @@ log = logging.getLogger(__name__)
 class AssembleMutations():
     
     def __init__(self, fasta_df, mutation_df, run_info_file, s6_df):
-        self.fasta_df = fasta_df
-        self.mutation_df = mutation_df
+        self.fasta_df = fasta_df.reset_index(drop=True)
+        self.mutation_df = mutation_df.reset_index(drop=True)
         self.run_info_file = run_info_file
         self.s6_df = s6_df
 
@@ -31,16 +32,12 @@ class AssembleMutations():
         '''
         purpose: check that input mutations are within genomic range of fasta_df
         input: mutation_df and fasta_df
-        output: adds column to mutation df with ref_ids that mutation falls in
-                removes mutations that are not found within any reference and 
-                lists them in run_info.txt       
+        output: adds column to mutation df with ref_ids that mutation falls in  
         '''
         
-        print("Checking that input mutations are within range of input fasta file.")
-        
         # alias dataframes for lazy typing
-        m_df = self.mutation_df.reset_index(drop=True)
-        f_df = self.fasta_df.reset_index(drop=True)
+        m_df = self.mutation_df
+        f_df = self.fasta_df
         
         # check that mutations are within chrom, start, stop, strand of any ref seq
         query = '''select m_df.chrom, m_df.pos,
@@ -54,38 +51,95 @@ class AssembleMutations():
             where m_df.pos between f_df.start and f_df.stop
             and m_df.strand = f_df.strand
         '''
-        # check that there is at least one valid mutation left to assemble
-        try:
-            # pull out mutations that are valid
-            # note, pandas query not supporting merge 'where pos between start and stop'
-            valid_mutations = psql.sqldf(query)       
+        # pull out mutations that are valid
+        # note, pandas query not supporting merge 'where pos between start and stop'
+        valid_mutations = psql.sqldf(query)  
+        
+        # check that there are any valid mutations
+        error_message = "No valid mutations found within wildtype regions."
+        if valid_mutations.empty:
+            log.error(error_message)
+            raise SystemExit(error_message)
+        
+        return valid_mutations
+    
+    @jit
+    def find_invalids(self, valids): 
+        '''
+        purpose: checks if there are mutations listed in vcf file that do not 
+            fall within the range of any input reference sequences
+        input: valids dataframe created in parse_mutations.mutation_checker(),
+            mutation_df
+        output: filters out invalid mutations that do not fall within the genomic 
+            range of any input reference sequences
+        '''
+        
+        # calculate variant starting position on reference
+        valids["var_start"] = (valids["pos"].astype(int) - valids["ref_start"].astype(int))
+        valids.reset_index(drop=True, inplace=True)
+        
+        # pull out the invalids to add to run_info.txt
+        invalids = self.mutation_df[~self.mutation_df['id'].isin(valids['var_id'])]
 
-            # check that there are any valid mutations
-            assert valid_mutations.shape[0] > 0
+        # if there are invalid mutations, write to self.run_info_file 
+        if not invalids.empty:
             
-            # pull out the invalids to add to run_info.txt
-            invalids = m_df[~m_df['id'].isin(valid_mutations['var_id'])]
+            # write info to run_info.txt
+            invalid_list = list(invalids.id)
 
-            # if there are invalid mutations, write to self.run_info_file 
-            if invalids.shape[0] > 0:
+            var_line = '''
+            \n The following variants were not located within a ref seq and were omitted:\n''' +\
+             ','.join(invalid_list) + "\n"
                 
-                # write info to run_info.txt
-                invalid_list = list(invalids.id)
+            log.info(var_line)   
+         
+        return valids
+    
+    def check_valids(self, valid_mutations):
+        '''
+        purpose: checks that the specified reference allele from the vcf file
+            is at the position specified in the reference sequence
+        input: valid mutation dataframe
+        output: will throw an error if mutations listed in vcf are not found in ref sequence
+        '''
+        
+        print("Checking that input mutations are within range of input fasta file.")
 
-                var_line = '''
-                \n The following variants were not located within a ref seq and were omitted:\n''' +\
-                 ','.join(invalid_list) + "\n"
-                with open(self.run_info_file, 'a+') as f:
-                    f.writelines(var_line)
-                    
-                log.info(var_line)    
-            return valid_mutations
-        
-        except Exception as e:
-            error_msg = "No valid mutations to assemble. Check run_info.txt. \n{}".format(e)
-            log.error(error_msg)
-            raise SystemExit(error_msg)
-        
+        # check that mutation ref allele matches position on reference
+        npt.assert_array_equal(valid_mutations.apply(lambda x: x['ref_seq'][x['var_start']], axis=1),
+        valid_mutations.apply(lambda x: x['ref'], axis=1),
+         "Ensure mutations in vcf are found within the reference sequence.")
+   
+    def process_mutations(self, input_df):
+        '''
+        purpose: create mutated sequences from input vcf file
+        input: mutation_df from assemble_mutations
+        output: fasta_df of combined reference and alternate sequences for assembly
+        '''
+    
+        # process deletions
+        input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
+            [seq[0:n] for n, seq in zip((input_df.var_start-input_df.mut_length), input_df.ref_seq)] +  \
+            input_df["alt"] + \
+            [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
+                
+        # process insertions
+        input_df.alt_seq[(input_df['mut_type'] == 'INS')] = \
+            [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
+            input_df["alt"] + \
+            [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
+            
+        # process snvs
+        input_df.alt_seq[(input_df['mut_type'] == 'SNV')] = \
+            [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
+            input_df["alt"]+ \
+            [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
+            
+        input_df.alt_seq = input_df.alt_seq.str.strip()
+                
+        return input_df
+
+    @jit
     def create_mutation_ref(self, valid_mutations):
         '''
         purpose: Create mutation reference sequence from input vcf file 
@@ -96,24 +150,25 @@ class AssembleMutations():
         '''
         print("Creating variant sequences from input VCF file.")
         # change length of column output for testing
-        pd.set_option('max_colwidth',600)
-
-        # calculate variant starting position on reference, subtract 1 for 0 based indexing
-        valid_mutations["var_start"] = (valid_mutations["pos"].astype(int) - valid_mutations["ref_start"].astype(int)) - 1
+        pd.set_option('display.max_columns', None)
          
         # calculate length of mutation
         valid_mutations['mut_length'] = 1 # initialize column with 1 so we don't have to calc snv's
-        valid_mutations.mut_length[(valid_mutations['mut_type'] == 'del')] = \
+        
+        # calculate length of deletions
+        valid_mutations.mut_length[(valid_mutations['mut_type'].str.lower() == 'del')] = \
             valid_mutations["ref"].str.len() - valid_mutations["alt"].str.len()
-        valid_mutations.mut_length[(valid_mutations['mut_type'] == 'ins')] = \
+        
+        # calculate length of insertions
+        valid_mutations.mut_length[(valid_mutations['mut_type'].str.lower() == 'ins')] = \
             valid_mutations["alt"].str.len() - valid_mutations["ref"].str.len()
         
         # add column to store alternate seq as string
         valid_mutations["alt_seq"] = ""
                                                                      
         # create mutated sequences
-        valid_mutations = cpy.process_mutations(valid_mutations)
-        
+        valid_mutations = self.process_mutations(valid_mutations)
+
         # reshape valid_mutations to concat with fasta_df
         valid_dict = {"id":valid_mutations["var_id"]+"_mut",
                       "chrom":valid_mutations["chrom"],
@@ -135,8 +190,15 @@ class AssembleMutations():
 
         # filter out mutations from vcf not located within any fasta seq
         valid_mutations = self.mutation_checker()
+        
+        # parse returned mutations
+        mutations_df = self.find_invalids(valid_mutations)
+        self.check_valids(mutations_df)
+        
+        
         # add mutation sequences to s6_df if vcf provided
-        mutant_fasta = self.create_mutation_ref(valid_mutations)
+        mutant_fasta = self.create_mutation_ref(mutations_df)
+        
         return mutant_fasta
         
 

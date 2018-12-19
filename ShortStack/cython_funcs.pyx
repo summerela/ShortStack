@@ -2,6 +2,7 @@
 functions in this script use cython to accelerate speed
 '''
 from ipywidgets.widgets.interaction import _get_min_max_value
+from collections import Counter
  
 def split_fasta(input_file):
     '''
@@ -29,35 +30,6 @@ def split_fasta(input_file):
             
     return info_list, seq_list
 
-def process_mutations(input_df):
-    '''
-    purpose: create mutated sequences from input vcf file
-    input: mutation_df from assemble_mutations
-    output: fasta_df of combined reference and alternate sequences for assembly
-    '''
-
-    # process deletions
-    input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
-        [seq[0:n] for n, seq in zip((input_df.var_start-input_df.mut_length), input_df.ref_seq)] +  \
-        input_df["alt"] + \
-        [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
-            
-    # process insertions
-    input_df.alt_seq[(input_df['mut_type'] == 'INS')] = \
-        [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
-        input_df["alt"] + \
-        [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
-        
-    # process snvs
-    input_df.alt_seq[(input_df['mut_type'] == 'SNV')] = \
-        [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
-        input_df["alt"]+ \
-        [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
-        
-    input_df.alt_seq = input_df.alt_seq.str.strip()
-            
-    return input_df
-
 def calc_hamming(str a, str b, int maxHD):
     '''
     purpose: calculate hamming distance between two strings
@@ -76,25 +48,25 @@ def calc_hamming(str a, str b, int maxHD):
                 break
     return (a,b, c)
 
-def calc_seq_hamming(str a, str b):
-    '''
-    purpose: calculate hamming distance between two strings
-    input: ngrams and targets
-    output: matrix of hamming distances between each target and ref seq ngram
-    '''
-    cdef int l, k, c
-    c = 0
-    l = len(a)
-    nuc_list = []
-    for k from 0 <= k < l:
-        if a[k] != b[k]:
-            mismatch = "{}:{}:{}".format(b[k],a[k],k)
-            nuc_list.append(mismatch)
-            c += 1
-    
-    if len(nuc_list) == 0:
-        nuc_list= ""
-    return c, nuc_list
+# def calc_seq_hamming(str a, str b):
+#     '''
+#     purpose: calculate hamming distance between two strings
+#     input: ngrams and targets
+#     output: matrix of hamming distances between each target and ref seq ngram
+#     '''
+#     cdef int l, k, c
+#     c = 0
+#     l = len(a)
+#     nuc_list = []
+#     for k from 0 <= k < l:
+#         if a[k] != b[k]:
+#             mismatch = "{}:{}:{}".format(b[k],a[k],k)
+#             nuc_list.append(mismatch)
+#             c += 1
+#     
+#     if len(nuc_list) == 0:
+#         nuc_list= ""
+#     return c, nuc_list
 
 def ngrams(str string, int n):
     '''
@@ -114,16 +86,16 @@ def calc_symmetricDiff(x):
     output: 
     '''
     # create list of target sets for all potential targets
-    cdef list targets
+    cdef list targets, result
     cdef set u 
     
     #  get a list of target sets for each feature id 
     targets = list(x.target_list.values)
-    
+     
     result = []
-
+ 
     for set_element in targets:
         result.append(len(set_element.difference(set.union(*[x for x in targets if x != set_element]))))
-
+ 
     return result
 

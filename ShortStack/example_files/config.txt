@@ -5,10 +5,10 @@
 
 [user_facing_options]
 output_dir = ./
-input_s6=/home/selasady/selasady/shortstack_python3/Input/krasNras_S6.json
-target_fa=/home/selasady/selasady/shortstack_python3/Input/kras_nras.fa
-encoding_table=/home/selasady/selasady/shortstack_python3/base_files/encoding.txt
-#mutation_vcf=/home/selasady/selasady/shortstack_python3/Input/kras_nras_mutant.vcf
+input_s6=./examples/krasNras_S6.json
+target_fa=./examples/kras_nras.fa
+encoding_table=./examples/encoding.txt
+#mutation_vcf=./examples/kras_nras_mutant.vcf
 
 [internal_options]
 kmer_length=6
