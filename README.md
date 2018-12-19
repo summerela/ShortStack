@@ -26,7 +26,9 @@ If you are trying to run this on Windows (insert sad face) you may first need to
 
 ### Install from github master branch 
 - stable release, but most likely not the most updated version
+
 To install the lastest development version, from your command line type: 
+
 
     pip install git+https://github.com/summerela/ShortStack.git@master --user
 
@@ -34,6 +36,7 @@ To install the lastest development version, from your command line type:
 - latest updates, not necessarily tested or stable
 
 To install the lastest development version, from your command line type: 
+
 
     pip install git+https://github.com/summerela/ShortStack.git@dev --user
 
@@ -65,17 +68,11 @@ Please see required options [here](https://github.com/summerela/ShortStack/blob/
     python run_shortstack.py -c path/to/config.txt
 
 ## Output
-### All3spotters
-All barcode events
-### Bc_counts
-Valid HD0s, diversity filtered
-### Invalids 
-Invalid barcodes (color code doesn’t exist in encoding file)
-### Rawcounts
-HD0/higher depending on cutoff
-Contains ontargets, offtargets that have a target, cycle/location information
-### No_ftm_calls
-Features not called
-### Ftm_calls
-Features called, gene, counts
+- All3spotters: All barcode events
+- Bc_counts: Valid HD0s, diversity filtered
+- Invalids: Invalid barcodes (color code doesn’t exist in encoding file)
+- Rawcounts: HD0/higher depending on cutoff
+    - Contains ontargets, offtargets that have a target, cycle/location information
+- No_ftm_calls: Features not called
+- Ftm_calls: Features called, gene, counts
 
