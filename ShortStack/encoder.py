@@ -5,6 +5,7 @@ module for matching s6 calls to probes
 import pandas as pd
 import numpy as np
 from numba import jit
+from pathlib import Path
 
 pd.options.mode.chained_assignment = None
 
@@ -16,6 +17,7 @@ class Encode_files():
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
+        self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
     
     @jit        
     def map_basecalls(self, s6_df, encoding_df):
@@ -28,8 +30,7 @@ class Encode_files():
         '''
 
         print("Matching basecalls with color encoding")
-        off_file = "{}/invalids.tsv".format(self.out_dir)
-
+        
         # match targets to base calls by merging s6_df and encoding_df
         encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
         encoded_df.sort_values(["FeatureID", "Target"], inplace=True)
@@ -41,7 +42,7 @@ class Encode_files():
         parity_df.drop("Target", axis=1, inplace=True)
         
         if not parity_df.empty:
-            parity_df.to_csv(off_file, sep="\t", index=False)
+            parity_df.to_csv(self.invalids_file, sep="\t", index=False)
         return encoded_df
     
     def remove_invalidBC(self, encoded_df):

@@ -22,10 +22,9 @@ log = logging.getLogger(__name__)
 
 class AssembleMutations():
     
-    def __init__(self, fasta_df, mutation_df, run_info_file, s6_df):
+    def __init__(self, fasta_df, mutation_df, s6_df):
         self.fasta_df = fasta_df.reset_index(drop=True)
         self.mutation_df = mutation_df.reset_index(drop=True)
-        self.run_info_file = run_info_file
         self.s6_df = s6_df
 
     def mutation_checker(self):
@@ -78,13 +77,13 @@ class AssembleMutations():
         valids["var_start"] = (valids["pos"].astype(int) - valids["ref_start"].astype(int))
         valids.reset_index(drop=True, inplace=True)
         
-        # pull out the invalids to add to run_info.txt
+        # pull out the invalids to add to log
         invalids = self.mutation_df[~self.mutation_df['id'].isin(valids['var_id'])]
 
-        # if there are invalid mutations, write to self.run_info_file 
+        # if there are invalid mutations, write to log file
         if not invalids.empty:
             
-            # write info to run_info.txt
+            # write info to log
             invalid_list = list(invalids.id)
 
             var_line = '''

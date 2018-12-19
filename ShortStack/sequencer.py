@@ -12,7 +12,7 @@ import re
 import swifter
 import networkx as nx
 from collections import defaultdict, Counter
-
+from pathlib import Path
 import multiprocessing as mp
 import dask
 import dask.dataframe as dd
@@ -171,13 +171,15 @@ class Sequencer():
 
         # sequence each molecule
         seq_list = []
+        
+        print("Creating graph...\n")
         for featureID, group in features:
             groupID = ''.join(group.groupID.unique())
-            print("Creating graph...\n")
+            
             edge_list = self.create_nodes(group)
-            print("Weighting graph edges...\n")
+            
             edge_df = self.sum_edge_weights(edge_list)
-            print("Finding best path through graph...\n")
+            
             path, graph = self.get_path(edge_df)
             seq = self.trim_path(path, graph)
             
@@ -187,7 +189,7 @@ class Sequencer():
             
         # save molecule sequences to file
         print("Saving sequences to file...\n")
-        seq_outfile = "{}/molecule_seqs.tsv".format(self.output_dir)
+        seq_outfile = Path("{}/molecule_seqs.tsv".format(self.output_dir))
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
          

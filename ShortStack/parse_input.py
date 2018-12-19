@@ -13,6 +13,7 @@ import ujson
 from numba import jit
 import swifter
 from Bio.GenBank.Record import Feature
+from pathlib import Path
 
 
 # import logger
@@ -86,7 +87,7 @@ class Parse_files():
         s6_df = pass_calls[pass_calls.Qual.str.contains(self.qc_string) == False].reset_index(drop=True)
         
         # save raw call data to file
-        s6_df_outfile = "{}/all3spotters.tsv".format(self.output_dir)
+        s6_df_outfile = Path("{}/all3spotters.tsv".format(self.output_dir))
         s6_df.to_csv(s6_df_outfile, sep="\t", index=False)
         
         return s6_df
@@ -115,7 +116,7 @@ class Parse_files():
         log.info("Parsing mutations file:{}".format(self.mutation_file))
             
         # read in mutation file, truncate to only one mutation per line
-        mutation_df = allel.vcf_to_dataframe(self.mutation_file, 
+        mutation_df = allel.vcf_to_dataframe(str(self.mutation_file), 
                                              fields=['CHROM', 'POS', 'ID', 
                                                      'REF', 'ALT', 
                                                      'variants/STRAND',
@@ -229,8 +230,8 @@ class Parse_files():
         format: s6 of either json, csv, or tsv. Will break otherwise. 
         output: Alters s6 file or returns same s6 file. 
         '''
-        print(os.path.splitext(self.input_s6)[1].lower())
-        if os.path.splitext(self.input_s6)[1].lower() != '.json':
+
+        if self.input_s6.suffix.lower() != '.json':
             
             print("Converting {} to JSON format.".format(self.input_s6))
             if self.all_fov == False:
@@ -246,9 +247,9 @@ class Parse_files():
         output: json s6 file generated in same directory as s6 file. Only generates json based on first FOV in s6 file. 
         '''    
         #Read in CSV
-        if os.path.splitext(self.input_s6, )[1] == '.csv':
+        if self.input_s6.suffix.lower() == '.csv':
             s6DF = pd.read_csv(self.input_s6)
-        elif os.path.splitext(self.input_s6)[1] == '.tsv':
+        elif self.input_s6.suffix.lower() == '.tsv':
             s6DF = pd.read_table(self.input_s6)
             
         #Remove cheeky comma column, if it exists
@@ -269,7 +270,7 @@ class Parse_files():
         #Make name of json file
         filename = os.path.splitext(os.path.basename(self.input_s6))[0]
         jsonname = "FOVID_" + str(fovcheck) + "_" + filename +'.json'
-        jsonfile = os.path.join(os.path.dirname(self.input_s6), jsonname)
+        jsonfile = Path.cwd() / jsonname
         self.input_s6 = jsonfile
         TotalDict = {'FovID':fovcheck,'Features':[]}
         #Iterate over entries in s6DF, construct dictionary of values for passing to json. Only grabbing first FOV in file.
@@ -305,9 +306,9 @@ class Parse_files():
         output: json s6 file generated in same directory as s6 file. Only generates json based on first FOV in s6 file. 
         '''    
         #Read in CSV
-        if os.path.splitext(self.input_s6, )[1] == '.csv':
+        if self.input_s6.suffix.lower() == '.csv':
             s6DF = pd.read_csv(self.input_s6)
-        elif os.path.splitext(self.input_s6)[1] == '.tsv':
+        elif self.input_s6.suffix.lower() == '.tsv':
             s6DF = pd.read_table(self.input_s6)
             
         #Remove cheeky comma column, if it exists
@@ -328,7 +329,7 @@ class Parse_files():
         #Make name of json file
         filename = os.path.splitext(os.path.basename(self.input_s6))[0]
         jsonname = 'All_FOV_' + filename + '.json'
-        jsonfile = os.path.join(os.path.dirname(self.input_s6), jsonname)
+        jsonfile = Path.cwd() / jsonname
         self.input_s6 = jsonfile
         TotalDict = {'FovID':fovcheck,'Features':[]}
         #Iterate over entries in s6DF, construct dictionary of values for passing to json.

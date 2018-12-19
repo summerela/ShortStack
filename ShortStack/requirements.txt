@@ -8,6 +8,7 @@ numba==0.38.1
 numpy==1.14.2
 pandas==0.22.0
 pandasql==0.7.3
+psutil==5.4.6
 scikit-allel==1.1.10
 seqlog==0.3.9
 swifter==0.223

@@ -89,6 +89,7 @@ import parse_mutations as mut
 import ftm
 import sequencer as seq
 import consensus as cons
+from pathlib import Path
 
 import pyximport; pyximport.install()
 
@@ -104,7 +105,7 @@ class ShortStack():
                  input_s6, 
                  target_fa, 
                  mutation_vcf='none',
-                 output_dir=os.getcwd(),
+                 output_dir=Path.cwd(),
                  encoding_table="./base_files/encoding.txt",  
                  kmer_length=6, 
                  qc_threshold=7,
@@ -128,22 +129,19 @@ class ShortStack():
 
         
         # initialize file paths and output dirs
-        self.output_dir = "{}/output/".format(output_dir)
-        self.running_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.abspath(config_path)
-        
+        self.output_dir =  Path.cwd() / "output"
+        self.running_dir =  Path(__file__).parents[0]
+        self.config_path = Path(config_path)
+
         # create output dir if not exists
         self.create_outdir(self.output_dir)
-        self.qc_out_file = "{}/imageQC_filtered.tsv".format(self.output_dir)
-        self.run_info_file = "{}/run_info.txt".format(self.output_dir)
-        self.base_dir = "{rd}/base_files/".format(rd=self.running_dir)
             
         # gather input file locations
-        self.input_s6 = os.path.abspath(input_s6)
-        self.target_fa = os.path.abspath(target_fa)
+        self.input_s6 = Path(input_s6)
+        self.target_fa = Path(target_fa)
         
         if mutation_vcf.lower() != "none": 
-            self.mutation_vcf = os.path.abspath(mutation_vcf)
+            self.mutation_vcf = Path(mutation_vcf)
         else:
             # temporarily disabling unsupervised mode
             raise SystemExit("\nUnsupervised mode not yet implemented. Please provide VCF file to continue.\n")      
@@ -167,8 +165,6 @@ class ShortStack():
         
         ***Results*** \n
         Results output to: {output}\n
-        Run Info and Warnings output to: {qc_file}\n
-        QC Stats output to: {qc_stats}\n
         '''.format(now=now, s6=self.input_s6,  
                    fasta=self.target_fa, 
                    colors=self.encoding_file, 
@@ -178,16 +174,13 @@ class ShortStack():
                    div_thresh = self.diversity_threshold,
                    config=self.config_path, 
                    output=self.output_dir,
-                   qc_file = self.run_info_file,
-                   qc_stats=self.qc_out_file,
                    min_cov=self.covg_threshold,
                    ham_dist=self.max_hamming_dist,
                    ham_weight=self.hamming_weight)
         
         print(run_string)
-        # write run info to wd/output/run_info.txt
-        with open(self.run_info_file, "w+") as f:
-            f.writelines(run_string)
+        # write run info to log
+        log.info(run_string)
 
     @staticmethod
     def create_outdir(output_dir):
@@ -197,35 +190,12 @@ class ShortStack():
         :return: directory created
         '''
         try:
-            if not os.path.exists(output_dir):
+            if not output_dir.is_dir():
                 os.makedirs(output_dir)
         except AssertionError as e:
             error_message = "Unable to create output dir at: {}".format(output_dir, e)
             log.error(error_message)
             raise SystemExit(error_msg)
-            
-    @staticmethod
-    def clean_up(dir, pattern):
-        '''
-        Clean up temp files and dirs
-        :param dir: Directory to clean
-        :param pattern: file name or wild-card style file name: ex. slurm*.out
-        :return: removal of specified files in dir
-        '''
-        for file in glob.glob("{}/{}".format(dir, pattern)):
-            os.remove(file)
-            log.info("Removed temp file: {} \n".format(file))
-            
-    @staticmethod
-    def parallelize_dataframe(self, df, func):
-    
-        chunks = round(df.shape[0]/10)
-        df_split = np.array_split(df, chunks)
-        
-        with cf.ProcessPoolExecutor(self.num_cores) as pool:
-            df = pd.concat(pool.map(func, df_split))
-        
-        return df
     
     @jit 
     def file_check(self, input_file):
@@ -236,7 +206,9 @@ class ShortStack():
         '''
         error_message = "Check that {} exists and is not empty.".format(input_file)
         print("Checking {}".format(input_file))
-        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
+        input_file = Path(input_file)
+        assert (input_file.is_file()) and (input_file.stat().st_size > 0), error_message
+
 
     def main(self):
         '''
@@ -254,7 +226,6 @@ class ShortStack():
         self.file_check(self.target_fa)
         self.file_check(self.mutation_vcf)
  
-         
         #########################
         ####   Parse Input   ####
         #########################
@@ -290,7 +261,6 @@ class ShortStack():
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
                                           mutation_df, 
-                                          self.run_info_file,
                                           s6_df)  
             # add mutated reference sequences to fasta_df        
             mutant_fasta = mutations.main()
@@ -317,8 +287,6 @@ class ShortStack():
                               self.max_hamming_dist,
                               self.output_dir,
                               self.diversity_threshold,
-                              self.qc_out_file,
-                              self.run_info_file,
                               self.num_cores,
                               self.hamming_weight
                               )
@@ -354,7 +322,7 @@ class ShortStack():
         # instantiate sequencing module from sequencer.py
         consensus = cons.Consensus(molecule_seqs,
                                  fasta_df,
-                                 output_dir)
+                                 self.output_dir)
          
          
         consensus.main()

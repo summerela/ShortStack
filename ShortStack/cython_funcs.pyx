@@ -79,23 +79,23 @@ def ngrams(str string, int n):
     ngrams = zip(*[string[i:] for i in range(n)])
     return [''.join(ngram)for ngram in ngrams]
 
-def calc_symmetricDiff(x):
-    '''
-    purpose: find reads that are unique to a target/feature
-    input: dataframe of perfect matches
-    output: 
-    '''
-    # create list of target sets for all potential targets
-    cdef list targets, result
-    cdef set u 
-    
-    #  get a list of target sets for each feature id 
-    targets = list(x.target_list.values)
-     
-    result = []
- 
-    for set_element in targets:
-        result.append(len(set_element.difference(set.union(*[x for x in targets if x != set_element]))))
- 
-    return result
+# def calc_symmetricDiff(x):
+#     '''
+#     purpose: find reads that are unique to a target/feature
+#     input: dataframe of perfect matches
+#     output: 
+#     '''
+#     # create list of target sets for all potential targets
+#     cdef list targets, result
+#     cdef set u 
+#     
+#     #  get a list of target sets for each feature id 
+#     targets = list(x.target_list.values)
+#      
+#     result = []
+#  
+#     for set_element in targets:
+#         result.append(len(set_element.difference(set.union(*[x for x in targets if x != set_element]))))
+#  
+#     return result
 

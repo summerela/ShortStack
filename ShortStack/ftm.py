@@ -12,6 +12,7 @@ from numba import jit
 import numpy as np
 import pandas as pd
 from collections import Counter
+from pathlib import Path
 
 # import logger
 log = logging.getLogger(__name__)
@@ -22,7 +23,6 @@ class FTM():
                  mutant_fasta, coverage_threshold, 
                  kmer_size, max_hamming_dist,
                  output_dir, diversity_threshold,
-                 qc_outfile, run_info_file, 
                  num_cores, hamming_weight):
         self.fasta_df = fasta_df
         self.encoded_df = encoded_df
@@ -32,9 +32,7 @@ class FTM():
         self.kmer_size = kmer_size
         self.output_dir = output_dir
         self.diversity_threshold = diversity_threshold
-        self.qc_outfile = qc_outfile
-        self.raw_count_file = "{}/rawCounts.tsv".format(self.output_dir)
-        self.run_info_file = run_info_file
+        self.raw_count_file = Path("{}/rawCounts.tsv".format(self.output_dir))
         self.num_cores = num_cores
         self.hamming_weight = hamming_weight
     
@@ -68,7 +66,7 @@ class FTM():
         ngrams.columns = ["gene", "pos", "ngram"]
         
         # save all ngrams to file for easy mapping later in case we need it
-        ngrams_out = "{}/all_ngrams.tsv".format(self.output_dir)
+        ngrams_out = Path("{}/all_ngrams.tsv".format(self.output_dir))
         ngrams.to_csv(ngrams_out, sep="\t", index=False)
 
         # get group information back from fasta_df
@@ -396,10 +394,22 @@ class FTM():
             else:
                 pass 
 
-    def unique_count(self, sets):
+    def sym_diff(self, sets):
+        '''
+        purpose: find reads that are unique to a target/feature
+        input: list of kmers from targets and input references
+        output:  tuples of symmetrical differences for each target/feature pairing
+        
+        '''
+        
+        # initialize counter object
         count = Counter()
+        
+        # compare sets of kmers for each potential target per feature
         for s in sets:
+            # update counter
             count.update(s)
+        # return number of unique reads found in each comparison
         return [sum(count[x] == 1 for x in s) for s in sets]
         
 #     @jit
@@ -429,7 +439,7 @@ class FTM():
             multi_df = multi_df.merge(target_df, on=["FeatureID", "groupID"], how="left")
 
             # calculate Targets unique to each region of interest
-            s = multi_df.groupby("FeatureID").apply(self.unique_count).reset_index()
+            s = multi_df.groupby("FeatureID").apply(self.sym_diff).reset_index()
             s.columns = ["FeatureID", "sym_diff"]
             
             # add symmetrical difference to multi_df
@@ -476,7 +486,7 @@ class FTM():
             ftm["counts"] = ftm.counts.astype(float).round(2)
             
             # output ftm to file
-            ftm_calls = "{}/ftm_calls.tsv".format(self.output_dir)
+            ftm_calls = Path("{}/ftm_calls.tsv".format(self.output_dir))
             ftm.to_csv(ftm_calls, sep="\t", index=False) 
     
             return ftm
@@ -502,7 +512,7 @@ class FTM():
            
             # save no_call info to file
             no_ftm = no_calls[["FeatureID"]].drop_duplicates()
-            no_ftm_file = "{}/no_ftm_calls.tsv".format(self.output_dir)
+            no_ftm_file = Path("{}/no_ftm_calls.tsv".format(self.output_dir))
             no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
             
         # pull out only calls related to FTM called region for HD under threshold   
@@ -557,7 +567,7 @@ class FTM():
                                         inplace=False)
         all_counts.reset_index(inplace=True, drop=True)
         
-        counts_file = "{}/all_ftm_counts.tsv".format(self.output_dir)
+        counts_file = Path("{}/all_ftm_counts.tsv".format(self.output_dir))
         all_counts.to_csv(counts_file, sep="\t", index=False)
         
         return all_counts
