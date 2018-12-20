@@ -129,7 +129,7 @@ class ShortStack():
 
         
         # initialize file paths and output dirs
-        self.output_dir =  Path.cwd() / "output"
+        self.output_dir =  Path("{}/output".format(output_dir))
         self.running_dir =  Path(__file__).parents[0]
         self.config_path = Path(config_path)
 
