@@ -130,7 +130,6 @@ class FTM():
         output: hamming_df with featureID, gene, group, target, pos
         '''
 
-        
         # create dataframe from list of matches and subset to hamming dist threshold
         hamming_df = pd.DataFrame(hamming_list, columns=["ref_match", "bc_feature", "hamming"])
         hamming_df = hamming_df[hamming_df.hamming != "X"]
@@ -152,13 +151,16 @@ class FTM():
         hamming_df.to_csv(self.raw_count_file , sep="\t", index=None)
 
         # reorder columns and subset
-        hamming_df = hamming_df[["FeatureID", "Target", "groupID", "pos", "ref_match", "hamming"]]
+        hamming_df2 = hamming_df[["FeatureID", "Target", "groupID", "pos", "ref_match", "hamming"]]
+        
+        hamming_df.drop(["ref_match", "bc_feature", "groupID", "pos",\
+                              "ngram", "hamming", "Category", "Qual"], axis=1, inplace=True)
         
         # separate perfect matches and hd1+
-        hd_plus = hamming_df[hamming_df.hamming > 0].reset_index(drop=True)
-        perfects = hamming_df[hamming_df.hamming == 0].reset_index(drop=True)
+        hd_plus = hamming_df2[hamming_df2.hamming > 0].reset_index(drop=True)
+        perfects = hamming_df2[hamming_df2.hamming == 0].reset_index(drop=True)
         
-        return hd_plus, perfects
+        return hd_plus, perfects, hamming_df
 
     @jit
     def diversity_filter(self, input_df):
@@ -589,7 +591,7 @@ class FTM():
         
         # parse hamming df and return calls beyond hamming threshold for qc
         print("Parsing the hamming results...\n")
-        hd_plus, perfects = self.parse_hamming(hamming_list, ngrams, ngrams_unique)
+        hd_plus, perfects, hamming = self.parse_hamming(hamming_list, ngrams, ngrams_unique)
       
         # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
@@ -627,7 +629,7 @@ class FTM():
         all_counts = self.return_all_calls(hd_plus, ftm, perfect_calls)
 
         # return ftm matches and feature_div filtered non-perfects
-        return all_counts
+        return all_counts, hamming
         
 
         

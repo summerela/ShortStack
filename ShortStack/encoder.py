@@ -38,12 +38,12 @@ class Encode_files():
 
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        parity_df["filter"] = "invalid"
-        parity_df.drop("Target", axis=1, inplace=True)
+        parity_df.drop(["Target", "Category"], axis=1, inplace=True)
         
         if not parity_df.empty:
             parity_df.to_csv(self.invalids_file, sep="\t", index=False)
-        return encoded_df
+        
+        return encoded_df, parity_df
     
     def remove_invalidBC(self, encoded_df):
         
@@ -59,6 +59,6 @@ class Encode_files():
         return encoded_df
     
     def main(self, s6_df, encoded_df):
-        mapped_df = self.map_basecalls(self.s6_df, self.encoding_df)
+        mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df).reset_index(drop=True)
-        return enocoded_df
+        return enocoded_df, parity_df

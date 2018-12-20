@@ -247,7 +247,7 @@ class ShortStack():
         # instantiate encoder class from encoder.py
         encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
         # return dataframe of targets found for each molecule   
-        encoded_df = encode.main(encoding_df,  s6_df)
+        encoded_df, parity_df = encode.main(encoding_df,  s6_df)
   
   
         ###################################
@@ -291,8 +291,35 @@ class ShortStack():
                               self.hamming_weight
                               )
         # run FTM
-        all_counts = run_ftm.main()
+        all_counts, hamming = run_ftm.main()
+        
+        #############################
+        ###   valid off targets   ###
+        #############################
+        # save valid barcodes that are off target
+        s6_df.drop(["Qual", "Category"], inplace=True, axis=1)
+        parity_df.drop("Qual", inplace=True, axis=1)
+        
+        
+        # get basecalls in s6 that are not in invalids
+        no_invalids = s6_df.merge(parity_df.drop_duplicates(), on=['FeatureID','BC', 'PoolID'], 
+                   how='left', indicator=True)
+        
+        # pull out feature id's/basecalls that are only in s6_df and not in invalids
+        no_invalids = no_invalids[no_invalids._merge == "left_only"]
+        no_invalids.drop("_merge", axis=1, inplace=True)
+        
+        # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
+        valid_offTargets = no_invalids.merge(hamming.drop_duplicates(), on=['FeatureID','BC', 'PoolID'], 
+                   how='left', indicator=True)
+        valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
+        valid_offTargets.drop(["_merge", "Target"], axis=1, inplace=True)
+        
+        # save to file
+        valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
+        valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
 
+        ### pickled objects for testing only ###
 #         all_counts = pd.read_pickle("./calls")
 #         fasta_df = pd.read_pickle("./fasta_df")
 #         output_dir = "./output"
