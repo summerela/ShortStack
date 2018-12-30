@@ -3,21 +3,30 @@ module for matching s6 calls to probes
 '''
 
 import pandas as pd
+import logging
 import numpy as np
 from numba import jit
 from pathlib import Path
+import dask
+import dask.dataframe as dd
+import multiprocessing as mp
+from dask.distributed import Client
 
 pd.options.mode.chained_assignment = None
+
+# import logger
+log = logging.getLogger(__name__)
 
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df, output_dir):
+    def __init__(self, s6_df, encoding_df, output_dir, client):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
         self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
+        self.client = client
     
     @jit        
     def map_basecalls(self, s6_df, encoding_df):
@@ -30,35 +39,38 @@ class Encode_files():
         '''
 
         print("Matching basecalls with color encoding")
-        
         # match targets to base calls by merging s6_df and encoding_df
-        encoded_df = self.s6_df.merge(encoding_df, how='left', on=["PoolID", "BC"])
-        encoded_df.sort_values(["FeatureID", "Target"], inplace=True)
-        encoded_df.reset_index(inplace=True, drop=True)
 
+        encoded_df = dd.merge(s6_df, encoding_df, how='left', 
+                                      right_on=["PoolID", "BC"],
+                                      left_on=["pool", "BC"])
+        encoded_df = self.client.persist(encoded_df)
+        
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        parity_df.drop(["Target", "Category"], axis=1, inplace=True)
+        parity_df = parity_df.drop(["PoolID", "bc_length"], axis=1).compute()
         
-        if not parity_df.empty:
+        if len(parity_df > 0):
             parity_df.to_csv(self.invalids_file, sep="\t", index=False)
-        
+
         return encoded_df, parity_df
     
+    @jit
     def remove_invalidBC(self, encoded_df):
-        
-        try:
-            # remove basecalls not valid in encoding file and reset index
-            encoded_df = encoded_df[~encoded_df['Target'].isnull()].reset_index(drop=True)
-            assert encoded_df.shape[0] > 1
-        except Exception as e:
-            error_msg = "No valid basecalls. Check that encoding file is accurate. \n{}".format(e)
-            log.error(error_msg)
-            raise SystemExit(error_msg)
+        '''
+        purpose: remove barcodes that did not match a target and return dataframe
+        input:
+        output:
+        '''
 
+        # remove basecalls not valid in encoding file and reset index
+        encoded_df = encoded_df[~encoded_df['Target'].isnull()].reset_index(drop=True)
+        assert len(encoded_df) != 0, "No valid barcodes found in encoding file."
+       
         return encoded_df
     
     def main(self, s6_df, encoded_df):
         mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df).reset_index(drop=True)
+
         return enocoded_df, parity_df

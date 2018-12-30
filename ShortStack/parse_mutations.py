@@ -16,6 +16,9 @@ import pyximport; pyximport.install()
 import cython_funcs as cpy
 import swifter
 from numba import jit
+import dask
+import dask.dataframe as dd
+from dask.distributed import Client
 
 # import logger
 log = logging.getLogger(__name__)
@@ -33,7 +36,7 @@ class AssembleMutations():
         input: mutation_df and fasta_df
         output: adds column to mutation df with ref_ids that mutation falls in  
         '''
-        
+
         # alias dataframes for lazy typing
         m_df = self.mutation_df
         f_df = self.fasta_df
@@ -53,7 +56,7 @@ class AssembleMutations():
         # pull out mutations that are valid
         # note, pandas query not supporting merge 'where pos between start and stop'
         valid_mutations = psql.sqldf(query)  
-        
+
         # check that there are any valid mutations
         error_message = "No valid mutations found within wildtype regions."
         if valid_mutations.empty:
@@ -75,7 +78,6 @@ class AssembleMutations():
         
         # calculate variant starting position on reference
         valids["var_start"] = (valids["pos"].astype(int) - valids["ref_start"].astype(int))
-        valids.reset_index(drop=True, inplace=True)
         
         # pull out the invalids to add to log
         invalids = self.mutation_df[~self.mutation_df['id'].isin(valids['var_id'])]
@@ -104,9 +106,9 @@ class AssembleMutations():
         
         print("Checking that input mutations are within range of input fasta file.")
 
-        # check that mutation ref allele matches position on reference
+        # check that first ref position of mutation matches wt sequence
         npt.assert_array_equal(valid_mutations.apply(lambda x: x['ref_seq'][x['var_start']], axis=1),
-        valid_mutations.apply(lambda x: x['ref'], axis=1),
+        valid_mutations.apply(lambda x: x['ref'][0], axis=1),
          "Ensure mutations in vcf are found within the reference sequence.")
    
     def process_mutations(self, input_df):
@@ -135,7 +137,7 @@ class AssembleMutations():
             [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
             
         input_df.alt_seq = input_df.alt_seq.str.strip()
-                
+
         return input_df
 
     @jit
@@ -148,8 +150,6 @@ class AssembleMutations():
         output: adds var seq as an entry to fasta_df with var id
         '''
         print("Creating variant sequences from input VCF file.")
-        # change length of column output for testing
-        pd.set_option('display.max_columns', None)
          
         # calculate length of mutation
         valid_mutations['mut_length'] = 1 # initialize column with 1 so we don't have to calc snv's
@@ -177,8 +177,9 @@ class AssembleMutations():
                       "strand":valid_mutations["strand"],
                       "groupID":valid_mutations["groupID"]
                       }
-        mutant_fasta = pd.DataFrame(valid_dict, columns=valid_dict.keys()) 
-        mutant_fasta.reset_index(drop=True, inplace=True)    
+        
+        # convert to pandas dataframe to pass to dask
+        mutant_fasta = pd.DataFrame(valid_dict, columns=valid_dict.keys())
 
         return mutant_fasta
                    
@@ -186,19 +187,23 @@ class AssembleMutations():
         '''
         Purpose: run all functions to assemble mutated sequences
         '''
+        
+        try:
 
-        # filter out mutations from vcf not located within any fasta seq
-        valid_mutations = self.mutation_checker()
-        
-        # parse returned mutations
-        mutations_df = self.find_invalids(valid_mutations)
-        self.check_valids(mutations_df)
-        
-        
-        # add mutation sequences to s6_df if vcf provided
-        mutant_fasta = self.create_mutation_ref(mutations_df)
-        
-        return mutant_fasta
+            # filter out mutations from vcf not located within any fasta seq
+            valid_mutations = self.mutation_checker()
+            
+            # parse returned mutations
+            mutations_df = self.find_invalids(valid_mutations)
+            self.check_valids(mutations_df)
+            
+            # add mutation sequences to s6_df if vcf provided
+            mutant_fasta = self.create_mutation_ref(mutations_df)
+            
+            return mutant_fasta
+        except Exception as e:
+            log.error(e)
+            raise SystemExit(e)
         
 
 

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 
 '''
@@ -16,6 +15,7 @@ numpy==1.14.2
 pandas==0.22.0
 pandasql==0.7.3
 psutil==5.4.6
+pytest==4.0.2
 scikit-allel==1.1.10
 seqlog==0.3.9
 swifter==0.223
@@ -51,29 +51,6 @@ import os    # traverse/operations on directories and files
 import time    # time/date stamp for log
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
 from logging.handlers import TimedRotatingFileHandler    # set time limit of 31 days on log files
-
-### Setup logging ###
-today = time.strftime("%Y%m%d")
-now = time.strftime("%Y%d%m_%H:%M:%S")
-
-log_file = "{}_ShortStack.log".format(today)
-FORMAT = '{"@t":%(asctime)s, "@mt":%(message)s,"@l":%(levelname)s, "@f":%(funcName)s}, "@ln":%(lineno)s'
-logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
-                    format=FORMAT)
-log = logging.getLogger(__name__)
-
-## setup rotating log handlers
-size_handler = RotatingFileHandler(
-              log_file, maxBytes=10000000 , backupCount=10)
-
-time_handler = TimedRotatingFileHandler(
-               log_file, when='D', interval=31, backupCount=10
-    )
-# add handlers for size and time limits
-log.addHandler(size_handler)
-log.addHandler(time_handler)
-
-# import remaining packages
 import configparser as cp   # parse config files 
 import argparse    #parse user arguments
 import pandas as pd
@@ -81,17 +58,26 @@ import numpy as np
 import psutil
 import concurrent.futures as cf
 from numba import jit
+import gc
+from pathlib import Path
+import pyximport; pyximport.install()
+from dask.distributed import Client
+import dask
+dask.config.set(shuffle='tasks')
+import dask.dataframe as dd
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+import psutil
+
 
 # import shortstack modules
 import parse_input 
 import encoder
 import parse_mutations as mut
 import ftm
+from dask.dataframe.io.tests.test_parquet import npartitions
 import sequencer as seq
-import consensus as cons
-from pathlib import Path
-
-import pyximport; pyximport.install()
+# import consensus as cons
 
 # get path to config file
 parser = argparse.ArgumentParser(description='Run ShortStack program.')
@@ -107,6 +93,7 @@ class ShortStack():
                  mutation_vcf='none',
                  output_dir=Path.cwd(),
                  encoding_table="./base_files/encoding.txt",  
+                 log_path = "./",
                  kmer_length=6, 
                  qc_threshold=7,
                  num_cores=6,
@@ -114,7 +101,8 @@ class ShortStack():
                  covg_threshold=2,
                  max_hamming_dist=1,
                  hamming_weight=1,
-                 all_fov=True):
+                 all_fov=True,
+                 ftm_HD0=True):
         
         # gather run options
         self.kmer_length = int(kmer_length)
@@ -126,9 +114,12 @@ class ShortStack():
         self.max_hamming_dist = int(max_hamming_dist)
         self.hamming_weight = int(hamming_weight)
         self.all_fov = all_fov
+        self.ftm_HD0 = ftm_HD0
+        self.cpus = psutil.cpu_count() - 3
 
         
         # initialize file paths and output dirs
+        self.log_path = log_path
         self.output_dir =  Path("{}/output".format(output_dir))
         self.running_dir =  Path(__file__).parents[0]
         self.config_path = Path(config_path)
@@ -140,11 +131,36 @@ class ShortStack():
         self.input_s6 = Path(input_s6)
         self.target_fa = Path(target_fa)
         
+        # setup run cluster
+        self.client = Client()
+        
         if mutation_vcf.lower() != "none": 
             self.mutation_vcf = Path(mutation_vcf)
         else:
             # temporarily disabling unsupervised mode
-            raise SystemExit("\nUnsupervised mode not yet implemented. Please provide VCF file to continue.\n")      
+            raise SystemExit("\nUnsupervised mode not yet implemented. Please provide VCF file to continue.\n")  
+        
+        ### Setup logging ###
+        today = time.strftime("%Y%m%d")
+        now = time.strftime("%Y%d%m_%H:%M:%S")
+        today_file = "{}_ShortStack.log".format(today)
+        log_file = Path(Path(self.log_path) / Path(today_file))
+        FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
+        logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
+                            format=FORMAT)
+        
+        self.log = logging.getLogger(__name__)
+        
+        ## setup rotating log handlers
+        size_handler = RotatingFileHandler(
+                      log_file, maxBytes=10000000 , backupCount=10)
+        
+        time_handler = TimedRotatingFileHandler(
+                       log_file, when='D', interval=31, backupCount=10
+            )
+        # add handlers for size and time limits
+        self.log.addHandler(size_handler)
+        self.log.addHandler(time_handler)    
         
         ###Log input config file options
         run_string = ''' \n ShortStack Run: {now}
@@ -162,6 +178,7 @@ class ShortStack():
         Minimum Coverage: {min_cov} \n
         Max Hamming Distance: {ham_dist} \n
         Hamming Weight: {ham_weight}\n
+        FTM with HD0 only: {ftm_perfects}\n
         
         ***Results*** \n
         Results output to: {output}\n
@@ -176,11 +193,12 @@ class ShortStack():
                    output=self.output_dir,
                    min_cov=self.covg_threshold,
                    ham_dist=self.max_hamming_dist,
-                   ham_weight=self.hamming_weight)
+                   ham_weight=self.hamming_weight,
+                   ftm_perfects = self.ftm_HD0)
         
         print(run_string)
         # write run info to log
-        log.info(run_string)
+        self.log.info(run_string)
 
     @staticmethod
     def create_outdir(output_dir):
@@ -194,7 +212,7 @@ class ShortStack():
                 os.makedirs(output_dir)
         except AssertionError as e:
             error_message = "Unable to create output dir at: {}".format(output_dir, e)
-            log.error(error_message)
+            self.log.error(error_message)
             raise SystemExit(error_msg)
     
     @jit 
@@ -225,39 +243,50 @@ class ShortStack():
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
         self.file_check(self.mutation_vcf)
- 
+    
         #########################
         ####   Parse Input   ####
         #########################
+        print("Parsing input file...\n")
         # instantiate parsing class from parse_input.py 
-        parse = parse_input.Parse_files(self.input_s6, 
+        parse = parse_input.Parse_files(self.input_s6,
                                         self.output_dir,
                                         self.target_fa,
                                         self.mutation_vcf, 
                                         self.encoding_file,
-                                        self.qc_threshold,
-                                        self.all_fov)
-           
-        s6_df, mutation_df, encoding_df, fasta_df = parse.main_parser()
-        
+                                        self.client)
+              
+        mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
+        s6_df = dd.from_pandas(s6_df, npartitions=self.cpus)
+        s6_df = self.client.persist(s6_df)
+ 
         ########################
         ####   Encode S6    ####
         ########################
-        log.info("Reads encoded using file:\n {}".format(self.encoding_file))  
+        enoding_message = "Matching basecalls with encoding information...\n"
+        print(enoding_message)
         # instantiate encoder class from encoder.py
-        encode = encoder.Encode_files(s6_df, encoding_df, self.output_dir)
+        encode = encoder.Encode_files(s6_df, 
+                                      encoding_df, 
+                                      self.output_dir,
+                                      self.client)
+           
         # return dataframe of targets found for each molecule   
-        encoded_df, parity_df = encode.main(encoding_df,  s6_df)
-  
-  
+        encoded_df, parity_df = encode.main(encoding_df, s6_df)
+        encoded_df = self.client.persist(encoded_df)
+         
+        # cleanup encoding_df
+        del encoding_df
+        gc.collect()
+         
         ###################################
         ####   Assemble Mutations    #####
         ###################################
         ## Supervised mode only ##
         # if mutations are provided, assemble mutation seqs from mutation_vcf
-        if self.mutation_vcf != "none":
+        if self.mutation_vcf is not None:
             print("Assembling input variants.\n")
-            log.info("Mutations assembled from:\n {}".format(self.mutation_vcf))
+            self.log.info("Mutations assembled from:\n {}".format(self.mutation_vcf))
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
                                           mutation_df, 
@@ -276,8 +305,7 @@ class ShortStack():
         ###############
         align_message = "Running FTM...\n"
         print(align_message)
-        log.info(align_message)
-   
+    
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -287,105 +315,124 @@ class ShortStack():
                               self.max_hamming_dist,
                               self.output_dir,
                               self.diversity_threshold,
-                              self.num_cores,
-                              self.hamming_weight
+                              self.hamming_weight,
+                              self.client,
+                              self.ftm_HD0
                               )
         # run FTM
         all_counts, hamming = run_ftm.main()
-        
+         
+        # cleanup 
+        del encoded_df, mutant_fasta
+        gc.collect()
+         
         #############################
         ###   valid off targets   ###
         #############################
+        print("Calculating valid off-target barcodes...\n")
         # save valid barcodes that are off target
-        s6_df.drop(["Qual", "Category"], inplace=True, axis=1)
-        parity_df.drop("Qual", inplace=True, axis=1)
-        
-        
-        # get basecalls in s6 that are not in invalids
-        no_invalids = s6_df.merge(parity_df.drop_duplicates(), on=['FeatureID','BC', 'PoolID'], 
-                   how='left', indicator=True)
-        
-        # pull out feature id's/basecalls that are only in s6_df and not in invalids
-        no_invalids = no_invalids[no_invalids._merge == "left_only"]
-        no_invalids.drop("_merge", axis=1, inplace=True)
-        
-        # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
-        valid_offTargets = no_invalids.merge(hamming.drop_duplicates(), on=['FeatureID','BC', 'PoolID'], 
-                   how='left', indicator=True)
-        valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
-        valid_offTargets.drop(["_merge", "Target"], axis=1, inplace=True)
-        
-        # save to file
-        valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
-        valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-
-        ### pickled objects for testing only ###
-#         all_counts = pd.read_pickle("./calls")
-#         fasta_df = pd.read_pickle("./fasta_df")
-#         output_dir = "./output"
-
+         
+        def save_validOffTarget(s6_df, parity_df, hamming_df):
+ 
+            # get basecalls in s6 that are not in invalids
+            no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), on=['FeatureID','BC', 'pool', 'cycle'], 
+                       how='left', indicator=True)
+             
+            # pull out feature id's/basecalls that are only in s6_df and not in invalids
+            no_invalids = no_invalids[no_invalids._merge == "left_only"]
+            no_invalids = no_invalids.drop(["_merge", "Target"], axis=1)
+             
+            no_invalids = self.client.persist(no_invalids)
+                     
+            # prep hamming_df for merge
+            hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
+            hamming_df = hamming_df.drop_duplicates()
+            hamming_df = self.client.persist(hamming_df)
+             
+            # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
+            valid_offTargets = dd.merge(no_invalids, hamming_df, on=['FeatureID','BC', 'pool', 'cycle'], 
+                       how='left', indicator=True) 
+            valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
+            valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
+             
+            valid_offTargets = self.client.persist(valid_offTargets)
+            valid_offTargets = valid_offTargets.compute()
+                     
+            # save to file
+            valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
+            valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
+         
+        save_validOffTarget(s6_df, parity_df, hamming)
+         
+        # clean up
+        del parity_df
+        gc.collect()
+        raise SystemExit("FTM successfully completed!")
         ####################
         ###   Sequence   ###
         ####################
         seq_message = "Determining molecule sequences...\n"
         print(seq_message)
-        log.info(seq_message) 
+        self.log.info(seq_message) 
+        
+#         fasta_df.to_pickle("./fasta_df.p")
+#         all_counts.to_pickle("./all_counts.p")
+
+        fasta_df = pd.read_pickle("./fasta_df.p")
+        all_counts = pd.read_pickle("./all_counts.p")
            
         # instantiate sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,
                                  fasta_df,
-                                 self.output_dir)
-         
+                                 self.output_dir,
+                                 self.client)
          
         molecule_seqs = sequence.main()
         
-        ####################
-        ###   Consensus   ###
-        ####################
-        consensus_message = "Obtaining consensus sequence...\n"
-        print(consensus_message)
-        log.info(consensus_message) 
-           
-        # instantiate sequencing module from sequencer.py
-        consensus = cons.Consensus(molecule_seqs,
-                                 fasta_df,
-                                 self.output_dir)
-         
-         
-        consensus.main()
-         
+#         ####################
+#         ###   Consensus   ###
+#         ####################
+#         consensus_message = "Obtaining consensus sequence...\n"
+#         print(consensus_message)
+#         self.log.info(consensus_message) 
+#            
+#         # instantiate sequencing module from sequencer.py
+#         consensus = cons.Consensus(molecule_seqs,
+#                                  fasta_df,
+#                                  self.output_dir)
+#          
+#          
+#         consensus.main()
 
 
+        
+        # shutdown dask client
+        self.client.close()
+        
+        
+        
 if __name__ == "__main__":
     
-    '''
-    Instantiate ShortStack instance with options from config.txt
-    '''
-    try: 
-        
-        # parse config file with default options
-        config = cp.ConfigParser()
-        configFilePath = args.config
-        config.read(configFilePath)
-        
-        
-        sStack = ShortStack(config_path=args.config,
-                    
-                    output_dir=config.get("user_facing_options","output_dir"),
-                    input_s6=config.get("user_facing_options", "input_s6"), 
-                    target_fa=config.get("user_facing_options","target_fa"), 
-                    mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
-                    encoding_table=config.get("user_facing_options", "encoding_table"),
-                    kmer_length=config.getint("internal_options","kmer_length"),
-                    covg_threshold=config.getint("internal_options","covg_threshold"),
-                    qc_threshold=config.getint("internal_options","qc_threshold"),
-                    diversity_threshold=config.getint("internal_options", "diversity_threshold"),
-                    max_hamming_dist=config.getint("internal_options", "max_hamming_dist"),
-                    hamming_weight=config.getint("internal_options", "hamming_weight"),
-                    all_fov=config.getboolean("internal_options", "all_fov"))
+    # parse config file with default options
+    config = cp.ConfigParser()
+    configFilePath = args.config
+    config.read(configFilePath)
     
-    
-        sStack.main()
-    except Exception as e:
-        print(e)
-        
+    sStack = ShortStack(config_path=args.config,
+                
+                output_dir=config.get("user_facing_options","output_dir"),
+                input_s6=config.get("user_facing_options", "input_s6"), 
+                target_fa=config.get("user_facing_options","target_fa"), 
+                mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
+                encoding_table=config.get("user_facing_options", "encoding_table"),
+                log_path=config.get("internal_options", "logFile_path"),
+                kmer_length=config.getint("internal_options","kmer_length"),
+                covg_threshold=config.getint("internal_options","covg_threshold"),
+                qc_threshold=config.getint("internal_options","qc_threshold"),
+                diversity_threshold=config.getint("internal_options", "diversity_threshold"),
+                max_hamming_dist=config.getint("internal_options", "max_hamming_dist"),
+                hamming_weight=config.getint("internal_options", "hamming_weight"),
+                all_fov=config.getboolean("internal_options", "all_fov"),
+                ftm_HD0=config.getboolean("internal_options", "ftm_HD0"))
+
+    sStack.main()
