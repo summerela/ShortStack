@@ -60,22 +60,24 @@ import concurrent.futures as cf
 from numba import jit
 import gc
 from pathlib import Path
+import psutil
 import pyximport; pyximport.install()
 from dask.distributed import Client
 import dask
-dask.config.set(shuffle='tasks')
 import dask.dataframe as dd
+from dask.dataframe.io.tests.test_parquet import npartitions
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
-import psutil
 
+
+# set runtime options
+dask.config.set(shuffle='tasks')
 
 # import shortstack modules
 import parse_input 
 import encoder
 import parse_mutations as mut
 import ftm
-from dask.dataframe.io.tests.test_parquet import npartitions
 import sequencer as seq
 # import consensus as cons
 
@@ -367,19 +369,18 @@ class ShortStack():
         # clean up
         del parity_df
         gc.collect()
+        
+        
+        # shutdown dask client
+        self.client.close()
         raise SystemExit("FTM successfully completed!")
+        
         ####################
         ###   Sequence   ###
         ####################
         seq_message = "Determining molecule sequences...\n"
         print(seq_message)
         self.log.info(seq_message) 
-        
-#         fasta_df.to_pickle("./fasta_df.p")
-#         all_counts.to_pickle("./all_counts.p")
-
-        fasta_df = pd.read_pickle("./fasta_df.p")
-        all_counts = pd.read_pickle("./all_counts.p")
            
         # instantiate sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,
