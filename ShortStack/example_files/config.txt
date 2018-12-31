@@ -5,10 +5,10 @@
 
 [user_facing_options]
 output_dir = ./
-input_s6=./examples/krasNras_S6.json
-target_fa=./examples/kras_nras.fa
-encoding_table=./examples/encoding.txt
-mutation_vcf=./examples/kras_nras_mutant.vcf
+input_s6=./example_files/krasNras_S6.csv
+target_fa=./example_files/kras_nras.fa
+encoding_table=./example_files/encoding.txt
+mutation_vcf=./example_files/kras_nras_mutant.vcf
 
 [internal_options]
 kmer_length=6
@@ -17,6 +17,7 @@ max_hamming_dist=1
 covg_threshold=4
 diversity_threshold=3
 all_fov=True
+ftm_HD0=True
 
 ### DO NOT EDIT THIS SECTION ###
 [DEFAULT]
@@ -29,4 +30,6 @@ diversity_threshold=21
 max_hamming_dist=1
 covg_threshold=3
 hamming_weight=1
-mutation_vcf=None
+mutation_vcf=
+logfile_path=./
+ftm_HD0=True
