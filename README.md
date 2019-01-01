@@ -29,14 +29,12 @@ If you are trying to run this on Windows (insert sad face) you may first need to
 
 To install the lastest development version, from your command line type: 
 
-
     pip install git+https://github.com/summerela/ShortStack.git@master --user
 
 ### Install from github dev branch 
 - latest updates, not necessarily tested or stable
 
 To install the lastest development version, from your command line type: 
-
 
     pip install git+https://github.com/summerela/ShortStack.git@dev --user
 
@@ -49,10 +47,10 @@ Please see required options [here](https://github.com/summerela/ShortStack/blob/
 ### encoding.txt 
 - TSV format
 - Must contain following columns:
-    - PoolID  Target  BC
-    - PoolID = FOV_x_y coords as Feature ID
-    - Target = Target sequence
-    - BC = nunberical basecall from imaging
+    - PoolID: int specifying which pool barcode was run in
+    - Target: string of target nucleotides for each input probe
+    - BC: matching base call for target
+    - bc_length: int specifying length of target to minimize downstream length calc
 ### target.fa
 - fasta header must be colon delimited
 - header must contain columns as follows: 
@@ -64,7 +62,7 @@ Please see required options [here](https://github.com/summerela/ShortStack/blob/
 - VCF4.3 format
 - INFO field must contain STRAND= followed by + or - 
 
-## To run: 
+## To run, from the command line type (update path to location of your config file): 
     python run_shortstack.py -c path/to/config.txt
 
 ## Output
