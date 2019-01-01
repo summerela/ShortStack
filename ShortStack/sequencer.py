@@ -27,12 +27,12 @@ log = logging.getLogger(__name__)
 class Sequencer():
     
     def __init__(self, 
-                 calls,
+                 counts,
                  fasta_df,
                  out_dir,
                  client):
     
-        self.calls = calls
+        self.counts = counts
         self.fasta_df = fasta_df
         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
         self.output_dir = out_dir
@@ -40,24 +40,25 @@ class Sequencer():
         self.client = client
      
     @jit   
-    def match_fasta(self, calls):
+    def match_fasta(self, counts):
         '''
         purpose: split target reads into individual bases
-        input: all_ftm_counts created in ftm.return_all_calls()
+        input: all_ftm_counts created in ftm.return_all_counts()
         output: individual bases, positions and counts per base
         '''   
-        
-        # convert calls to dask 
-        calls = dd.from_pandas(calls, npartitions=self.cpus)
-        calls = self.client.persist(calls)
+       
+        # convert counts to dask 
+        counts = dd.from_pandas(counts, npartitions=self.cpus)
+        counts = self.client.persist(counts)
         
         # pull start position from fasta_df
-        nuc_df = dd.merge(calls, self.tiny_fasta, left_on="groupID", right_on="groupID") 
+        nuc_df = dd.merge(counts, self.tiny_fasta, left_on="groupID", right_on="groupID") 
         nuc_df["pos"] = nuc_df.pos.astype(int) + nuc_df.start.astype(int) 
         nuc_df = nuc_df.drop(["start"], axis=1)
 
         return nuc_df 
     
+    @jit
     def break_edges(self, df):
         '''
         purpose: break apart kmers into 2 base pairs to form edge list for graph
@@ -77,29 +78,34 @@ class Sequencer():
         df = df.set_index(df["id"],
                           shuffle="tasks",
                           sorted=True,
-                          npartitions=self.cpus)
+                          npartitions=self.cpus*2)
         
-        df = self.client.persist(df)
+        # drop id column
+        df = df.drop("id", axis=1)
 
+        return df
+
+    def create_ngrams(self, df):
+        
         # use cython ngrams function to break apart kmers
-        df["nuc"] = df.Target.map_partitions(lambda x: x.apply((lambda row: cpy.ngrams(row, 2))))\
-            .compute(num_worker=self.cpus)
-            
-        # convert back to pandas because lists are faster
-        df = df.reset_index(drop=True)
+        df["nuc"] = df.Target.map(lambda x: cpy.ngrams(x, 2))
+        
+        # persist data frame for downstream analysis
+        df = self.client.persist(df)
 
         return df
     
     def create_nodes(self, x):
+
         edge_list = []
-        
+         
         edge_list.append(x.apply(
              lambda row: 
             [(str(row.pos + i) + ":" + ''.join(c)[0],
-             str(row.pos + 1 + i) + ":" + ''.join(c)[1],
+             str(row.pos + (1 + i)) + ":" + ''.join(c)[1],
              row.bc_count) for i, c in enumerate(row.nuc)],
             axis=1))
-        raise SystemExit(edge_list) 
+        
         # flatten lists of tuples
         flat_list = [item for sublist in edge_list for item in sublist]
         flat_edge_list = [item for sublist in flat_list for item in sublist]
@@ -111,8 +117,9 @@ class Sequencer():
         
         # dataframe for summing totals and adding to graph
         edge_df = pd.DataFrame(edge_list, columns=["edge1", "edge2", "count"])
-         
-        edge_df["weight"] = edge_df.groupby(["edge1", "edge2"])["count"].transform(sum)
+        
+        # sum edge weights
+        edge_df["weight"] = edge_df.groupby(["edge1", "edge2"])["count"].transform("sum")
         edge_df.drop("count", axis=1, inplace=True)
  
         return edge_df
@@ -180,16 +187,26 @@ class Sequencer():
     
     def main(self):
         
+        
         # maintain info on featureID and region
-        feature_list = self.calls[["FeatureID", "groupID"]].drop_duplicates().reset_index(drop=True)
+        feature_list = self.counts[["FeatureID", "groupID"]].drop_duplicates().reset_index(drop=True)
         
         # convert target sequence to base and position with count
         print("Matching targets with position..\n")
-        split_targets = self.match_fasta(self.calls)
+        split_targets = self.match_fasta(self.counts)
+        
+        # create graph edges
+        print("Creating graph edges..\n")
         edge_df = self.break_edges(split_targets)
         
+        # slit dataframe into edges
+        print("Splitting edges by nucleotide...\n")
+        ngrams = self.create_ngrams(edge_df)
+        ngrams = self.client.compute(ngrams)
+        ngrams = ngrams.result()
+
         # group information by featureID
-        features = edge_df.groupby("FeatureID")
+        features = ngrams.groupby("FeatureID")
 
         # sequence each molecule
         seq_list = []
@@ -199,9 +216,9 @@ class Sequencer():
             groupID = ''.join(group.groupID.unique())
             
             edge_list = self.create_nodes(group)
-            
+
             edge_df = self.sum_edge_weights(edge_list)
-            
+            raise SystemExit(edge_df)
             path, graph = self.get_path(edge_df)
             seq = self.trim_path(path, graph)
             
@@ -214,7 +231,7 @@ class Sequencer():
         seq_outfile = Path("{}/molecule_seqs.tsv".format(self.output_dir))
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
-         
+
         return seq_df
             
 #### non graphical solution #### 
@@ -225,25 +242,25 @@ class Sequencer():
 # class Sequencer():
 #     
 #     def __init__(self, 
-#                  calls,
+#                  counts,
 #                  fasta_df,
 #                  out_dir):
 #     
-#         self.calls = calls
+#         self.counts = counts
 #         self.fasta_df = fasta_df
 #         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
 #         self.output_dir = out_dir
 #      
 #     @jit   
-#     def match_fasta(self, calls):
+#     def match_fasta(self, counts):
 #         '''
 #         purpose: split target reads into individual bases
-#         input: all_ftm_counts created in ftm.return_all_calls()
+#         input: all_ftm_counts created in ftm.return_all_counts()
 #         output: individual bases, positions and counts per base
 #         '''   
 #         
 #         # pull start position from fasta_df
-#         nuc_df = calls.merge(self.tiny_fasta, left_on="groupID", right_on="groupID") 
+#         nuc_df = counts.merge(self.tiny_fasta, left_on="groupID", right_on="groupID") 
 #         nuc_df["pos"] = nuc_df.pos.astype(int) + nuc_df.start.astype(int) 
 #         nuc_df.drop(["start", "gene"], axis=1, inplace=True)
 # 
@@ -310,11 +327,11 @@ class Sequencer():
 #     def main(self):
 #         
 #         # maintain info on featureID and region
-#         feature_list = self.calls[["FeatureID", "groupID"]].drop_duplicates().reset_index(drop=True)
+#         feature_list = self.counts[["FeatureID", "groupID"]].drop_duplicates().reset_index(drop=True)
 #         
 #         # convert target sequence to base and position with count
 #         print("Matching targets with position..\n")
-#         split_targets = self.match_fasta(self.calls)
+#         split_targets = self.match_fasta(self.counts)
 #         edge_df = self.break_edges(split_targets)
 #         
 #         # group edge dataframe by feature to sequence
