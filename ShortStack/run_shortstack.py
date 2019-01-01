@@ -26,20 +26,23 @@ ujson==1.35
 Required Input: 
 - s6 file
     must be in JSON format
-- barcode.txt 
+- encoding.txt 
     must be tsv
     must contain following columns
-    PoolID  Target  BC
+    - PoolID: int specifying which pool barcode was run in
+    - Target: string of target nucleotides for each input probe
+    - BC: matching base call for target
+    - bc_length: int specifying length of target to minimize downstream length calc
  
 - target.fa
     fasta header must be colon delimited
     header must contain columns as follows
-    id:chrom:start:stop:build
+    id:chrom:start:stop:build:strand(+ or -)
 
 Optional Input:
 - predefined mutations in vcf4.3 format
 
-To run: 
+To run, type the following from the command line: 
 python run_shortstack.py -c path/to/config.txt
 
 '''
