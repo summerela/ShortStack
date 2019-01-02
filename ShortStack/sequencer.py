@@ -77,12 +77,11 @@ class Sequencer():
         
         df = df.set_index(df["id"],
                           shuffle="tasks",
-                          sorted=True,
                           npartitions=self.cpus*2)
         
         # drop id column
         df = df.drop("id", axis=1)
-
+        
         return df
 
     def create_ngrams(self, df):
@@ -218,7 +217,7 @@ class Sequencer():
             edge_list = self.create_nodes(group)
 
             edge_df = self.sum_edge_weights(edge_list)
-            raise SystemExit(edge_df)
+
             path, graph = self.get_path(edge_df)
             seq = self.trim_path(path, graph)
             
