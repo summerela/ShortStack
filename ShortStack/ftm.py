@@ -546,8 +546,6 @@ class FTM():
         else:
             
             ftm = no_ties
-            if not ftm.empty:
-                ftm = ftm.drop(["max_count", "second_max"], axis=1)
 
         if not ftm.empty:
 
