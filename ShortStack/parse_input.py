@@ -206,7 +206,7 @@ class Parse_files():
         # Remove whitespace from column headers
         df.columns = df.columns.str.strip()
         
-        df["FeatureID"] = df["Features"].astype(str) + "_" + df["x"].astype(str) + "_" + df["y"].astype(str)
+        df["FeatureID"] = df["fov"].astype(str) + "_" + df["x"].astype(str) + "_" + df["y"].astype(str)
         df= df.drop(["Features", "fov", "x", "y"], axis=1)
 
         return df
