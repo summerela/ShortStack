@@ -20,13 +20,14 @@ log = logging.getLogger(__name__)
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df, output_dir, client):
+    def __init__(self, s6_df, encoding_df, output_dir, client, cpus):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
         self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
         self.client = client
+        self.cpus = cpus
     
     @jit        
     def map_basecalls(self, s6_df, encoding_df):
