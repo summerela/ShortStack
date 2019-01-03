@@ -216,7 +216,7 @@ class FTM():
         # filter out FeatureID/gene combos that are below feature_div threshold
         input_df["feature_div"] = input_df.groupby(["FeatureID", "groupID"])["Target"].transform("nunique") 
         
-        diversified = input_df[input_df.feature_div > self.diversity_threshold]
+        diversified = input_df[input_df.feature_div >= self.diversity_threshold]
         diversified.reset_index(inplace=True, drop=True)
         
         # check that calls were found
@@ -250,10 +250,7 @@ class FTM():
         # noramlize multi-mapped reads
         if not multi.empty:
             multi["counts"] = 1/multi.multi_mapped
-            if not counts.empty:
-                counts = pd.concat([counts, multi], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
-            else:
-                counts = multi
+            counts = pd.concat([counts, multi], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
                 
         return counts
 
