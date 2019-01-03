@@ -32,7 +32,8 @@ class Parse_files():
                  target_fa, 
                  mutation_file, 
                  encoder_file,
-                 client):
+                 client,
+                 cpus):
         
         self.input_s6 = input_s6
         self.output_dir = output_dir
@@ -40,7 +41,7 @@ class Parse_files():
         self.mutation_file = mutation_file
         self.encoder_file = encoder_file
         self.client= client
-        self.cpus = psutil.cpu_count() - 3
+        self.cpus = cpus
     
     @jit        
     def test_cols(self, input_df, df_name, required_cols):
