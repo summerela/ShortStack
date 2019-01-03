@@ -12,7 +12,11 @@ import re
 import swifter
 from collections import defaultdict, Counter
 from pathlib import Path
-
+from dask.distributed import Client
+import dask
+import dask.dataframe as dd
+from dask.dataframe.io.tests.test_parquet import npartitions
+import psutil
 
 # import logger
 log = logging.getLogger(__name__)
@@ -22,14 +26,17 @@ class Consensus():
     def __init__(self, 
                  molecule_seqs,
                  fasta_df,
-                 out_dir):
+                 out_dir,
+                 client,
+                 cpus):
     
         self.molecule_seqs = molecule_seqs
         self.fasta_df = fasta_df
         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
         self.output_dir = out_dir
+        self.client = client
+        self.cpus = cpus
     
-      
     def count_molecules(self, x):
         
         nucs = defaultdict(Counter)
@@ -51,49 +58,79 @@ class Consensus():
                     nuc_weight = 1
                 
                 nucs[key][nuc] +=  nuc_weight
-                
+       
         return nucs
+    
+    def get_MAF(self, groupID, nuc_counts, sample_size):
+        
+        # get allele count per position
+        freqs = pd.DataFrame(nuc_counts).T
+        freqs = dd.from_pandas(freqs, npartitions=self.cpus)
+        
+        # replace NaN with 0
+        freqs = freqs.fillna(0)
 
+        # get frequency per position
+        freqs = freqs.loc[:, freqs.columns != 'pos'].apply(lambda x: round((x/sample_size * 100),3),
+                                                            meta={
+                                                                  'A': 'float',
+                                                                  'C':'float',
+                                                                  'G':'float',
+                                                                  'N':'float',
+                                                                  'T':'float'}, 
+                                                                 axis=1)
+        freqs = freqs.reset_index()
+        freqs.columns = ["pos", "A", "C", "G", "N", "T"]
+        freqs["id"] = str(groupID)
+        freqs = freqs[["id", "pos", "A", "C", "G", "T", "N"]]
+        
+        # keep in memory for downstream parsing
+        freqs = self.client.compute(freqs)
+        freqs = freqs.result()
+        
+        return freqs
+    
     @jit
-    def get_seq(self, nuc_counts):
+    def pos_match(self, freqs, fasta_df):
         
-        seq_list = []
+        # get starting position for each group id
+        freqs = dd.merge(freqs, fasta_df[["id", "start", "chrom"]],
+                         on="id")
         
-        for key, nuc in nuc_counts.items():
-            max_nuc = []
-            max_val = max(nuc.values())
-            for x, y in nuc.items():
-                if y == max_val:
-                    max_nuc.append(x)
-                    
-            if len(max_nuc) != 1:
-                max_nuc = "N"
-            else:
-                max_nuc = ''.join(max_nuc)
-            
-            seq_list.append(max_nuc)
+        # label with correct genomic location
+        freqs["pos"] = freqs.pos.astype(int) + freqs.start.astype(int)
+        freqs = freqs.drop("start", axis=1)
         
-        sequence = ''.join(seq_list)
-        
-        return sequence   
+        return freqs
+
         
     def main(self):
         
-        consensus_list = []
+        maf_list = []
         
-        # create consensus sequence for each feature
+        # get allele frequencies for each feature
         for feature, data in self.molecule_seqs.groupby("region"):
+            
+            group_size = data.shape[0]
 
             groupID = ''.join(data.region.unique())
             
-            bases = self.count_molecules(data)
-            consensus = self.get_seq(bases)
+            # get base counts
+            freqs = self.count_molecules(data)
             
-            consensus_info = "{},{}".format(groupID, consensus)
-              
-            consensus_list.append(consensus_info)
+            maf = self.get_MAF(feature, freqs, group_size)
+            
+            # format base counts to allele frequencies
+            maf_df = self.pos_match(maf, self.fasta_df)
+            maf_df = maf_df[["id", "chrom", "pos", "A", "T", "G", "C", "N"]]
+            
+            # add regional df to maf_list
+            maf_list.append(maf_df)
         
+        # concatenate maf dataframes for each region
+        maf_dfs = dd.multi.concat(maf_list,  interleave_partitions=True)
+        maf_out = maf_dfs.compute()
+
         # save molecule sequences to file
-        consensus_out = Path("{}/consensus_seqs.tsv".format(self.output_dir))
-        consensus_df = pd.DataFrame([sub.split(",") for sub in consensus_list], columns=["region", "seq"])
-        consensus_df.to_csv(consensus_out, sep="\t", index=False) 
+        consensus_out = Path("{}/consensus_maf.tsv".format(self.output_dir))
+        maf_out.to_csv(consensus_out, sep="\t", index=False) 
