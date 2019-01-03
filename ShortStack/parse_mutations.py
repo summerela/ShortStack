@@ -25,10 +25,11 @@ log = logging.getLogger(__name__)
 
 class AssembleMutations():
     
-    def __init__(self, fasta_df, mutation_df, s6_df):
+    def __init__(self, fasta_df, mutation_df, s6_df, cpus):
         self.fasta_df = fasta_df.reset_index(drop=True)
         self.mutation_df = mutation_df.reset_index(drop=True)
         self.s6_df = s6_df
+        self.cpus = cpus
 
     def mutation_checker(self):
         '''
