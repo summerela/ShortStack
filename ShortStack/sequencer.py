@@ -17,6 +17,7 @@ import multiprocessing as mp
 import dask
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
+from dask.bag.core import split
 dask.config.set(scheduler='threads')
 import psutil
 import swifter
@@ -47,10 +48,9 @@ class Sequencer():
         input: all_ftm_counts created in ftm.return_all_counts()
         output: individual bases, positions and counts per base
         '''   
-       
+        
         # convert counts to dask 
         counts = dd.from_pandas(counts, npartitions=self.cpus)
-        counts = self.client.persist(counts)
         
         # pull start position from fasta_df
         nuc_df = dd.merge(counts, self.tiny_fasta, left_on="groupID", right_on="groupID") 
@@ -78,7 +78,7 @@ class Sequencer():
         
         df = df.set_index(df["id"],
                           shuffle="tasks",
-                          npartitions=self.cpus*2)
+                          npartitions=self.cpus)
         
         # drop id column
         df = df.drop("id", axis=1)
@@ -91,7 +91,7 @@ class Sequencer():
         df["nuc"] = df.Target.map(lambda x: cpy.ngrams(x, 2))
         
         # persist data frame for downstream analysis
-        df = self.client.persist(df)
+        df = df.compute()
 
         return df
     
@@ -109,7 +109,7 @@ class Sequencer():
         # flatten lists of tuples
         flat_list = [item for sublist in edge_list for item in sublist]
         flat_edge_list = [item for sublist in flat_list for item in sublist]
-        
+
         return flat_edge_list
     
     @jit
@@ -202,8 +202,6 @@ class Sequencer():
         # slit dataframe into edges
         print("Splitting edges by nucleotide...\n")
         ngrams = self.create_ngrams(edge_df)
-        ngrams = self.client.compute(ngrams)
-        ngrams = ngrams.result()
 
         # group information by featureID
         features = ngrams.groupby("FeatureID")
@@ -230,6 +228,7 @@ class Sequencer():
         print("Saving sequences to file...\n")
         seq_outfile = Path("{}/molecule_seqs.tsv".format(self.output_dir))
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
+
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
 
         return seq_df

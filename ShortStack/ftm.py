@@ -477,9 +477,7 @@ class FTM():
             sym_diff = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
             sym_diff = sym_diff.reset_index(drop=False)
             sym_diff.columns = ["FeatureID", "sym_diff"]
-            
-            
-#                     
+                   
              # add symmetrical difference to multi_df
             sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
                      for k,v in sym_diff.sym_diff.to_dict().items()]).reset_index()
@@ -516,7 +514,7 @@ class FTM():
         if not ftm.empty:
 
             # format df
-            ftm.drop(["feature_div", "hamming"], axis=1, inplace=True) 
+            ftm.drop(["feature_div", "hamming", "sym_diff"], axis=1, inplace=True) 
             ftm["counts"] = ftm.counts.astype(float).round(2)
 
             # output ftm to file

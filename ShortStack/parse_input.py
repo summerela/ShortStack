@@ -273,7 +273,7 @@ class Parse_files():
                 mutation_df = self.parse_mutations()
             else: 
                 mutation_df = "none"
-           
+
             # parse encoding file    
             encoding_df = self.parse_encoding()
             

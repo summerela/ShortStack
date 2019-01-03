@@ -65,13 +65,14 @@ class Consensus():
         
         # get allele count per position
         freqs = pd.DataFrame(nuc_counts).T
-        freqs = dd.from_pandas(freqs, npartitions=self.cpus)
         
         # replace NaN with 0
         freqs = freqs.fillna(0)
-
+        
+        freq_dd = dd.from_pandas(freqs, npartitions=self.cpus)
+        
         # get frequency per position
-        freqs = freqs.loc[:, freqs.columns != 'pos'].apply(lambda x: round((x/sample_size * 100),3),
+        freq_dd = freq_dd.apply(lambda x: round((x/sample_size * 100),3),
                                                             meta={
                                                                   'A': 'float',
                                                                   'C':'float',
@@ -79,19 +80,21 @@ class Consensus():
                                                                   'N':'float',
                                                                   'T':'float'}, 
                                                                  axis=1)
-        freqs = freqs.reset_index()
-        freqs.columns = ["pos", "A", "C", "G", "N", "T"]
-        freqs["id"] = str(groupID)
-        freqs = freqs[["id", "pos", "A", "C", "G", "T", "N"]]
+        # reset index to get position
+        freq_dd = freq_dd.reset_index()
+        freq_dd.columns = ["pos", "A", "C", "G", "N", "T"]
+        
+        freq_dd["id"] = str(groupID)
+        freq_dd = freq_dd[["id", "pos", "A", "C", "G", "T", "N"]]
         
         # keep in memory for downstream parsing
-        freqs = self.client.compute(freqs)
-        freqs = freqs.result()
+        freq_dd = freq_dd.compute()
         
-        return freqs
+        return freq_dd
     
     @jit
     def pos_match(self, freqs, fasta_df):
+        
         
         # get starting position for each group id
         freqs = dd.merge(freqs, fasta_df[["id", "start", "chrom"]],
@@ -109,6 +112,7 @@ class Consensus():
         maf_list = []
         
         # get allele frequencies for each feature
+        print("Calculating allele frequency...\n")
         for feature, data in self.molecule_seqs.groupby("region"):
             
             group_size = data.shape[0]
@@ -118,16 +122,19 @@ class Consensus():
             # get base counts
             freqs = self.count_molecules(data)
             
+            # calculate allele frequency            
             maf = self.get_MAF(feature, freqs, group_size)
             
+
             # format base counts to allele frequencies
             maf_df = self.pos_match(maf, self.fasta_df)
             maf_df = maf_df[["id", "chrom", "pos", "A", "T", "G", "C", "N"]]
-            
+
             # add regional df to maf_list
             maf_list.append(maf_df)
         
         # concatenate maf dataframes for each region
+        print("Formatting output...\n")
         maf_dfs = dd.multi.concat(maf_list,  interleave_partitions=True)
         maf_out = maf_dfs.compute()
 

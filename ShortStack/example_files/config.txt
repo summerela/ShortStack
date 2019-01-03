@@ -16,7 +16,7 @@ qc_threshold=7
 max_hamming_dist=1
 covg_threshold=4
 diversity_threshold=3
-ftm_HD0=False
+ftm_HD0=True
 
 ### DO NOT EDIT THIS SECTION ###
 [DEFAULT]
@@ -29,6 +29,6 @@ diversity_threshold=21
 max_hamming_dist=1
 covg_threshold=3
 hamming_weight=1
-mutation_vcf=
+mutation_vcf=None
 logfile_path=./
 ftm_HD0=True
