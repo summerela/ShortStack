@@ -29,7 +29,7 @@ class FTM():
                  mutant_fasta, coverage_threshold, 
                  kmer_size, max_hamming_dist,
                  output_dir, diversity_threshold,
-                 hamming_weight, client, ftm_HD0):
+                 hamming_weight, client, ftm_HD0, cpus):
         self.fasta_df = fasta_df
         self.encoded_df = encoded_df
         self.mutant_fasta = mutant_fasta
@@ -42,18 +42,11 @@ class FTM():
         self.hamming_weight = hamming_weight
         self.client = client
         self.kmer_lengths = [int(x) for x in list(set(self.encoded_df.bc_length.values.compute()))]
-        self.cpus = psutil.cpu_count() - 3
+        self.cpus = cpus
         self.ftm_HD0 = ftm_HD0
-    
-    def create_ngrams(self, input_fasta, input_vcf):
-        '''
-        purpose: breaks apart reference sequence into self.kmer_length kmers
-        input: fasta_df, mutation_df if provided
-        output: ngrams dictionary to pass to parse_ngrams
-        '''
         
-        num_sizes = len(self.kmer_lengths)
-        part_size = (num_sizes * 4)
+    @jit
+    def create_fastaDF(self, input_fasta, input_vcf):
 
         # if supervised, add mutants to fasta_df
         if not input_vcf.empty:
@@ -66,11 +59,23 @@ class FTM():
         seq_series = pd.Series(fasta_df.seq.values, 
                                index=fasta_df.id.values,
                                dtype="object")
+
+        return seq_series, fasta_df
+    
+    def create_ngrams(self, fasta_series):
+        '''
+        purpose: breaks apart reference sequence into self.kmer_length kmers
+        input: fasta_df, mutation_df if provided
+        output: ngrams dictionary to pass to parse_ngrams
+        '''
+        
+        # determine if varying kmer lengths
+        num_sizes = len(self.kmer_lengths)
         
         # if there is only one kmer size, process
         if num_sizes == 1:
             ngram_dict = {}
-            for gene, seq in seq_series.iteritems():
+            for gene, seq in fasta_series.iteritems():
                 ngram_dict[gene] = cpy.ngrams(seq.strip(), n=self.kmer_size)
         
         # else create ngrams for each kmer size
@@ -79,7 +84,7 @@ class FTM():
             # break apart each sequence into ngrams for each kmer length in encoding file
             ngram_dict = defaultdict(list)
             for size in self.kmer_lengths:
-                for gene, seq in seq_series.iteritems():
+                for gene, seq in fasta_series.iteritems():
                     ngram_dict[gene].append(cpy.ngrams(seq.strip(), n=size))
             
             # flatten nested lists of differing kmers sizes
@@ -88,20 +93,20 @@ class FTM():
                ngram_flat[key] = [y for x in value for y in x]
             ngram_dict = ngram_flat
             
-        return ngram_dict, fasta_df
+         # merge ngrams with gene id and starting pos of kmer    
+        ngrams = pd.DataFrame(pd.concat({k: pd.Series(v) for k, v in ngram_dict.items()})).reset_index()
+        ngrams.columns = ["gene", "pos", "ngram"]
+   
+        return ngrams
     
-
-    def parse_ngrams(self, ngram_dict, fasta_df):
+    @jit
+    def parse_ngrams(self, ngrams, fasta_df):
         '''
         purpose: parse the ngram dictionary created in create_ngrams
         input: ngram dictionary created in create_ngrams
         output: dataframe with kmers and associated gene and position on ref
             both to region and to each variant/wt
         '''
-        
-        # merge ngrams with gene id and starting pos of kmer    
-        ngrams = pd.DataFrame(pd.concat({k: pd.Series(v) for k, v in ngram_dict.items()})).reset_index()
-        ngrams.columns = ["gene", "pos", "ngram"]
         
         # get group information back from fasta_df
         ngrams = ngrams.merge(fasta_df[["id", "groupID"]], 
@@ -153,7 +158,7 @@ class FTM():
 
         # create dataframe from list of matches and subset to hamming dist threshold
         hamming_df = pd.DataFrame(hamming_list, columns=["ref_match", "bc_feature", "hamming"])
-        hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus/10)
+        hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
         hamming_df = hamming_df[hamming_df.hamming != "X"]
         
         assert len(hamming_df) != 0, "No matches were found below hamming distance threshold."
@@ -192,7 +197,7 @@ class FTM():
         
         # else return HD1+ but keep in perfects table
         else: 
-            hd_plus = hamming_df2[hamming_df2.hamming > 0]
+            hd_plus = pd.DataFrame()
             perfects = hamming_df2
         
         # subset original hamming_df for valid offtargets   
@@ -245,8 +250,11 @@ class FTM():
         # noramlize multi-mapped reads
         if not multi.empty:
             multi["counts"] = 1/multi.multi_mapped
-            counts = pd.concat([counts, multi], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
-        
+            if not counts.empty:
+                counts = pd.concat([counts, multi], axis=0).drop("multi_mapped", axis=1).reset_index(drop=True)
+            else:
+                counts = multi
+                
         return counts
 
     @jit
@@ -260,20 +268,17 @@ class FTM():
         
         # round counts to two decimal places      
         counts["counts"] = counts["counts"].astype(float).round(2)
-
-        # count barcodes for each target per feature 
-        bc_counts = counts.copy(deep=True)
         
         # sum counts per feature/region/pos
-        bc_counts["bc_count"] = counts.groupby(['FeatureID', 'Target', 'groupID', 'pos'])\
+        counts["bc_count"] = counts.groupby(['FeatureID', 'Target', 'groupID', 'pos'])\
             ["counts"].transform("sum")
         
         # information will be duplicated for each row, drop dups   
-        bc_counts = bc_counts.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
+        counts = counts.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
                                                     keep="first")
         
-        # drop old counts per basecall to keep count per position
-        bc_counts.drop(["counts"],axis=1, inplace=True)
+        ## calculate counts per barcode
+        bc_counts = counts.drop(["counts"],axis=1)
         
         # sort counts for nicer output
         bc_counts = bc_counts.sort_values(by=["FeatureID", 
@@ -291,11 +296,11 @@ class FTM():
                       index=False, 
                       header=True)
         
-        # sum counts per gene
+         # sum counts per region
         perfects = bc_counts.copy(deep=True)
         perfects = perfects.drop(["ref_match"], axis=1)
         perfects["counts"] = perfects.groupby(['FeatureID', 'groupID'])['bc_count'].transform("sum")
-        
+
         # save new subset copy of perfects for downstream analysis
         bc_counts2 = perfects.copy(deep=True)
         bc_counts2.drop(["counts"], axis=1, inplace=True)
@@ -310,7 +315,7 @@ class FTM():
         perfects = perfects[perfects["counts"].astype(int) >= self.coverage_threshold]
         perfects.reset_index(drop=True, inplace=True) 
         assert len(perfects) != 0, "No matches found above coverage threshold." 
-        
+
         return bc_counts2, perfects
 
 
@@ -335,12 +340,10 @@ class FTM():
         input: perfects of perfect matches
         output: perfects subset to top two matches 
         '''
-        # convert to dask for speed
-        pefects = dd.from_pandas(perfects, npartitions=self.cpus*.25)
         
         # return all rows that match the max,2nd gene_count scores
         perfects = perfects[(perfects.counts == perfects.max_count) | (perfects.counts == perfects.second_max)]
-        perfects.reset_index(drop=True, inplace=True)
+        perfects = perfects.reset_index(drop=True)
         
         return perfects
 
@@ -350,14 +353,14 @@ class FTM():
         input: perfects created in ftm.sum_counts.py
         output: dataframe of ties and non-tied counts for passing to return_ftm
         '''
-        
+
         # pull out features that have more than one possible target
         no_ties = perfects.groupby('FeatureID').filter(lambda x: len(x)==1)
         multis = perfects.groupby('FeatureID').filter(lambda x: len(x)> 1)
 
         # filter multis for (max_count - second_max = 0)
         multis = perfects.loc[perfects.max_count - multis.second_max > 0]
-
+        
         return no_ties, multis
 
 
@@ -373,6 +376,8 @@ class FTM():
         output: used in return_ftm to return ties that pass this filtering logic
         '''
         
+         # take top sym_diff score for group
+        max_symDiff = x.sym_diff.max()
         
         # in case of multiple rows, get single value for max and second max
         max_count = int(x.max_count.unique())
@@ -397,25 +402,7 @@ class FTM():
                 
                 # return result with max unique diversity
                 else:
-                    
-                    # calculate Targets unique to each region of interest
-                    s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
-                    s.columns = ["FeatureID", "sym_diff"]
-                    
-                     # add symmetrical difference to multi_df
-                    sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
-                             for k,v in s.sym_diff.to_dict().items()])
-                    
-                    # add sym_diff column to top two df (x)
-                    x["sym_diff"] = sym_df.sym_diff
-                    
-                    # take top sym_diff score for group
-                    max_symDiff = x.sym_diff.max()
-                    
-                    # return result with max sym_diff score
                     result = x[x.sym_diff == max_symDiff]
-                    
-                    result = result.drop("sym_diff", axis=1)
 
                     # if there is still a tie, no call can be made
                     if len(result) > 1:
@@ -433,25 +420,7 @@ class FTM():
             
             # if ties, take result with greatest unique feature diversity
             if len(result) > 1:
-                
-                # calculate Targets unique to each region of interest
-                s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
-                s.columns = ["FeatureID", "sym_diff"]
-                
-                 # add symmetrical difference to multi_df
-                sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
-                         for k,v in s.sym_diff.to_dict().items()])
-                
-                # add sym_diff column to top two df (x)
-                x["sym_diff"] = sym_df.sym_diff
-                
-                # take top sym_diff score for group
-                max_symDiff = x.sym_diff.max()
-                
-                # return result with max sym_diff score
                 result = x[x.sym_diff == max_symDiff]
-                
-                result = result.drop("sym_diff", axis=1)
                 
                 # if there is a still a tie, no call can be made
                 if len(result) == 1:
@@ -465,25 +434,8 @@ class FTM():
         
         # if no 3x coverage, no 2x unique diversity, return result with highest unique feature div      
         else:
-            # calculate Targets unique to each region of interest
-            s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
-            s.columns = ["FeatureID", "sym_diff"]
-            
-             # add symmetrical difference to multi_df
-            sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
-                     for k,v in s.sym_diff.to_dict().items()])
-            
-            # add sym_diff column to top two df (x)
-            x["sym_diff"] = sym_df.sym_diff
-            
-            # take top sym_diff score for group
-            max_symDiff = x.sym_diff.max()
-            
-            # return result with max sym_diff score
             result = x[x.sym_diff == max_symDiff]
             
-            result = result.drop("sym_diff", axis=1)
-    
             # if there is a tie here, no call can be made
             if len(result) == 1:
                 return result
@@ -521,6 +473,20 @@ class FTM():
             # add target lists to multi_df
             multi_df = multi_df.merge(target_df, on=["FeatureID", "groupID"], how="left")
             
+            # calculate Targets unique to each region of interest
+            sym_diff = multi_df.groupby("FeatureID", group_keys=False).apply(cpy.calc_symmetricDiff)
+            sym_diff = sym_diff.reset_index(drop=False)
+            sym_diff.columns = ["FeatureID", "sym_diff"]
+            
+            
+#                     
+             # add symmetrical difference to multi_df
+            sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
+                     for k,v in sym_diff.sym_diff.to_dict().items()]).reset_index()
+             
+            # add sym_diff column to top two df (x)
+            multi_df["sym_diff"] = sym_df.sym_diff
+
             ### process ties ###
             broken_ties = multi_df.groupby('FeatureID').apply(self.multi_breaker) 
 
@@ -552,11 +518,11 @@ class FTM():
             # format df
             ftm.drop(["feature_div", "hamming"], axis=1, inplace=True) 
             ftm["counts"] = ftm.counts.astype(float).round(2)
-            
+
             # output ftm to file
             ftm_calls = Path("{}/ftm_calls.tsv".format(self.output_dir))
             ftm.to_csv(ftm_calls, sep="\t", index=False) 
-            
+
             return ftm
         else: 
             raise SystemExit("No FTM calls can be made on this dataset.")
@@ -600,31 +566,40 @@ class FTM():
         '''
         # get counts for HD1+ FTM call 
         ftm_df = ftm_df.drop(["counts"], axis=1)
-        hd1_plus = pd.merge(hamming_df, ftm_df, on=['FeatureID', 'groupID'], how='inner')
-        
-        # locate multi-mapped hd1+ barcodes and add counts
-        normalized = self.locate_multiMapped(hd1_plus)
-        
-         # round counts to two decimal places      
-        normalized["counts"] = normalized["counts"].astype(float).round(2)
-        
-        # sum counts per feature/region/pos
-        normalized["bc_count"] = normalized.groupby(['FeatureID', 'Target', 'groupID', 'pos'])\
-            ["counts"].transform("sum")
-        
-        # information will be duplicated for each row, drop dups   
-        hd_counts = normalized.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
-                                                    keep="first")
-        
-        # drop old counts per basecall to keep count per position
-        hd_counts.drop(["counts", "ref_match"],axis=1, inplace=True)
         
         # order dataframes
         perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
-        hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
-
-        # concatenate dataframe
-        all_counts = pd.concat([perfect_calls, hd_counts])
+        
+        if self.ftm_HD0:
+            
+            # get hd1+ for ftm called regions
+            hd1_plus = pd.merge(hamming_df, ftm_df, on=['FeatureID', 'groupID'], how='inner')
+            
+            # locate multi-mapped hd1+ barcodes and add counts
+            normalized = self.locate_multiMapped(hd1_plus)
+        
+            # round counts to two decimal places      
+            normalized["counts"] = normalized["counts"].astype(float).round(2)
+        
+            # sum counts per feature/region/pos
+            normalized["bc_count"] = normalized.groupby(['FeatureID', 'Target', 'groupID', 'pos'])\
+                ["counts"].transform("sum")
+            
+            # information will be duplicated for each row, drop dups   
+            hd_counts = normalized.drop_duplicates(subset=["FeatureID", "groupID", "Target", "pos"],
+                                                        keep="first")
+            
+            # drop old counts per basecall to keep count per position
+            hd_counts.drop(["counts", "ref_match"],axis=1, inplace=True)
+            
+            hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
+    
+            # concatenate dataframe
+            all_counts = pd.concat([perfect_calls, hd_counts])
+            
+        else:
+            
+            all_counts = perfect_calls
         
         all_counts = all_counts.sort_values(by=["FeatureID", 
                                         "pos",
@@ -644,45 +619,49 @@ class FTM():
     
     def main(self):
         
+        # create fasta dataframe and combine with mutations if provided
+        print("Checking for known mutation sites...\n")
+        seq_series, fasta_df = self.create_fastaDF(self.fasta_df, self.mutant_fasta)
+         
         # break reference seq into kmers
         print("Breaking up reference sequence into kmers...\n")
-        ngram_dict, fasta_df = self.create_ngrams(self.fasta_df, self.mutant_fasta) 
-        
+        ngrams = self.create_ngrams(seq_series) 
+         
         # parse ngram dataframe
         print("Formatting ngram dataframe...\n")
-        ngrams_unique, ngrams_group = self.parse_ngrams(ngram_dict, fasta_df) 
-
+        ngrams_unique, ngrams_group = self.parse_ngrams(ngrams, fasta_df) 
+ 
         # match Targets with basecalls
         print("Locating basecalls within hamming distance threshold...\n")
         hamming_list = self.find_hammingDist(ngrams_group, self.encoded_df)
-        
+         
         # parse hamming df and return calls beyond hamming threshold for qc
         print("Parsing the hamming results...\n")
         hd_plus, perfects, hamming = self.parse_hamming(hamming_list, ngrams_group, ngrams_unique)
-      
+       
         # filter for feature feature_div
         print("Filtering results for feature diversity...\n")
         diversified = self.diversity_filter(perfects)
-
+ 
         # locate multi-mappped reads
         print("Normalizing counts...\n")
         counts = self.locate_multiMapped(diversified)
-
+ 
         # sum normalized counts
         print("Summing counts....\n")
         bc_counts, norm_counts = self.sum_counts(counts)
-
+ 
         # pull out top 2 counts for perfects, separating hd1+
         print("Finding max counts...\n")
         top2 = self.get_top2(norm_counts)  
-        
+         
         # filter top2 genes by coverage threshold
         top_df = self.find_tops(top2)
-
+ 
         # find ties to process
         print("Processing Target coverage...\n")
         perfects, multi_df = self.find_ties(top_df)
-        
+
         # return ftm calls
         print("Generating FTM calls...\n")
         ftm = self.return_ftm(bc_counts, perfects, multi_df)
@@ -697,6 +676,137 @@ class FTM():
 
         # return ftm matches and feature_div filtered non-perfects
         return all_counts, hamming
+    
+    
+    
+# def multi_breaker(self, x):
+#         
+#         '''
+#         purpose: uses cython_funcs.calc_symmetricDiff to find unique bc for features 
+#             with more than one possible target. 
+#             With top 2 feature diversity scores, if one score is 2x or greater, keep
+#             else, calculate symmetric difference and keep score with most unique bc's
+#         input: multi_df
+#             x = feature's top two rows
+#         output: used in return_ftm to return ties that pass this filtering logic
+#         '''
+#         
+#         
+#         # in case of multiple rows, get single value for max and second max
+#         max_count = int(x.max_count.unique())
+#         second_max = int(x.second_max.unique())
+#         
+#         # get top two feature diversity scores
+#         max_div =  x.feature_div.nlargest(2).max()
+#         second_div = x.feature_div.nlargest(2).min()
+# 
+#         # if max > 3x coverage, return max
+#         if max_count >= (3 * second_max):
+#             
+#             result = x[x.counts == max_count]
+# 
+#             # if more than one row meets criteria, look for diversity 2x >
+#             if len(result) > 1:
+#                 
+#                 # if one result has 2x > feature diversity, return result
+#                 if max_div >= (2 * second_div):
+#                     result = x[x.feature_div == max_div]
+#                     return result
+#                 
+#                 # return result with max unique diversity
+#                 else:
+#                     
+#                     # calculate Targets unique to each region of interest
+#                     s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
+#                     s.columns = ["FeatureID", "sym_diff"]
+#                     
+#                      # add symmetrical difference to multi_df
+#                     sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
+#                              for k,v in s.sym_diff.to_dict().items()])
+#                     
+#                     # add sym_diff column to top two df (x)
+#                     x["sym_diff"] = sym_df.sym_diff
+#                     
+#                     # take top sym_diff score for group
+#                     max_symDiff = x.sym_diff.max()
+#                     
+#                     # return result with max sym_diff score
+#                     result = x[x.sym_diff == max_symDiff]
+#                     
+#                     result = result.drop("sym_diff", axis=1)
+# 
+#                     # if there is still a tie, no call can be made
+#                     if len(result) > 1:
+#                         pass
+#                     else:
+#                         return result
+#             # if no tie, return result
+#             else:
+#                 return result
+#         
+#         # if no max > 3x covg, check for results with 2x unique feature diversity
+#         elif max_div >= (2 * second_div):
+#             
+#             result = x[x.feature_div == max_div]
+#             
+#             # if ties, take result with greatest unique feature diversity
+#             if len(result) > 1:
+#                 
+#                 # calculate Targets unique to each region of interest
+#                 s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
+#                 s.columns = ["FeatureID", "sym_diff"]
+#                 
+#                  # add symmetrical difference to multi_df
+#                 sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
+#                          for k,v in s.sym_diff.to_dict().items()])
+#                 
+#                 # add sym_diff column to top two df (x)
+#                 x["sym_diff"] = sym_df.sym_diff
+#                 
+#                 # take top sym_diff score for group
+#                 max_symDiff = x.sym_diff.max()
+#                 
+#                 # return result with max sym_diff score
+#                 result = x[x.sym_diff == max_symDiff]
+#                 
+#                 result = result.drop("sym_diff", axis=1)
+#                 
+#                 # if there is a still a tie, no call can be made
+#                 if len(result) == 1:
+#                     return result
+#                 else:
+#                     pass
+#             
+#             # return result if no tie here   
+#             else:
+#                 return result       
+#         
+#         # if no 3x coverage, no 2x unique diversity, return result with highest unique feature div      
+#         else:
+#             # calculate Targets unique to each region of interest
+#             s = x.groupby("FeatureID")["target_list"].apply(cpy.calc_symmetricDiff).reset_index()
+#             s.columns = ["FeatureID", "sym_diff"]
+#             
+#              # add symmetrical difference to multi_df
+#             sym_df = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
+#                      for k,v in s.sym_diff.to_dict().items()])
+#             
+#             # add sym_diff column to top two df (x)
+#             x["sym_diff"] = sym_df.sym_diff
+#             
+#             # take top sym_diff score for group
+#             max_symDiff = x.sym_diff.max()
+#             
+#             # return result with max sym_diff score
+#             result = x[x.sym_diff == max_symDiff]
+#             
+#             result = result.drop("sym_diff", axis=1)
+#     
+#             # if there is a tie here, no call can be made
+#             if len(result) == 1:
+#                 return result
+#             else:
+#                 pass 
         
 
         
