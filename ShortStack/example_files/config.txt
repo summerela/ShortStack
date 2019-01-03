@@ -16,8 +16,7 @@ qc_threshold=7
 max_hamming_dist=1
 covg_threshold=4
 diversity_threshold=3
-all_fov=True
-ftm_HD0=True
+ftm_HD0=False
 
 ### DO NOT EDIT THIS SECTION ###
 [DEFAULT]
