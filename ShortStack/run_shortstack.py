@@ -106,7 +106,6 @@ class ShortStack():
                  covg_threshold=2,
                  max_hamming_dist=1,
                  hamming_weight=1,
-                 all_fov=True,
                  ftm_HD0=True):
         
         # gather run options
@@ -118,9 +117,8 @@ class ShortStack():
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
         self.hamming_weight = int(hamming_weight)
-        self.all_fov = all_fov
         self.ftm_HD0 = ftm_HD0
-        self.cpus = psutil.cpu_count() - 3
+        self.cpus = psutil.cpu_count()/2
 
         
         # initialize file paths and output dirs
@@ -137,7 +135,7 @@ class ShortStack():
         self.target_fa = Path(target_fa)
         
         # setup run cluster
-        self.client = Client()
+        self.client = Client(name="ShortStack")
         
         if mutation_vcf.lower() != "none": 
             self.mutation_vcf = Path(mutation_vcf)
@@ -248,7 +246,7 @@ class ShortStack():
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
         self.file_check(self.mutation_vcf)
-     
+        
         #########################
         ####   Parse Input   ####
         #########################
@@ -259,12 +257,13 @@ class ShortStack():
                                         self.target_fa,
                                         self.mutation_vcf, 
                                         self.encoding_file,
-                                        self.client)
-               
+                                        self.client,
+                                        self.cpus)
+                  
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
         s6_df = dd.from_pandas(s6_df, npartitions=self.cpus)
         s6_df = self.client.persist(s6_df)
-  
+    
         ########################
         ####   Encode S6    ####
         ########################
@@ -274,16 +273,17 @@ class ShortStack():
         encode = encoder.Encode_files(s6_df, 
                                       encoding_df, 
                                       self.output_dir,
-                                      self.client)
-            
+                                      self.client,
+                                      self.cpus)
+              
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
         encoded_df = self.client.persist(encoded_df)
-          
+            
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-          
+            
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -295,7 +295,8 @@ class ShortStack():
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
                                           mutation_df, 
-                                          s6_df)  
+                                          s6_df,
+                                          self.cpus)  
             # add mutated reference sequences to fasta_df        
             mutant_fasta = mutations.main()
         # no mutations provided = unsupervised mode and mutant_fasta is empty
@@ -304,13 +305,13 @@ class ShortStack():
             print(mut_message)
             log.info(mut_message)
             mutant_fasta = ""
-  
+    
         ###############
         ###   FTM   ###
         ###############
         align_message = "Running FTM...\n"
         print(align_message)
-     
+       
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -322,58 +323,62 @@ class ShortStack():
                               self.diversity_threshold,
                               self.hamming_weight,
                               self.client,
-                              self.ftm_HD0
+                              self.ftm_HD0,
+                              self.cpus
                               )
         # run FTM
         all_counts, hamming = run_ftm.main()
-          
+            
         # cleanup 
         del encoded_df, mutant_fasta
         gc.collect()
-          
+            
         #############################
         ###   valid off targets   ###
         #############################
         print("Calculating valid off-target barcodes...\n")
         # save valid barcodes that are off target
-          
+           
         def save_validOffTarget(s6_df, parity_df, hamming_df):
-  
+   
             # get basecalls in s6 that are not in invalids
             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True)
-              
+               
             # pull out feature id's/basecalls that are only in s6_df and not in invalids
             no_invalids = no_invalids[no_invalids._merge == "left_only"]
             no_invalids = no_invalids.drop(["_merge", "Target"], axis=1)
-              
+               
             no_invalids = self.client.persist(no_invalids)
-                      
+                       
             # prep hamming_df for merge
             hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
             hamming_df = hamming_df.drop_duplicates()
             hamming_df = self.client.persist(hamming_df)
-              
+               
             # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
             valid_offTargets = dd.merge(no_invalids, hamming_df, on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True) 
             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-              
+               
             valid_offTargets = self.client.persist(valid_offTargets)
             valid_offTargets = valid_offTargets.compute()
-                      
+                       
             # save to file
             valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
             valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-          
+           
         save_validOffTarget(s6_df, parity_df, hamming)
-          
+           
         # clean up
         del parity_df, s6_df
         gc.collect()
-         
-        print("FTM successfully completed.")
+        
+        # shutdown dask client
+        self.client.close()
+          
+        raise SystemExit("FTM successfully completed.")
  
         ####################
         ###   Sequence   ###
@@ -381,14 +386,17 @@ class ShortStack():
         seq_message = "Determining molecule sequences...\n"
         print(seq_message)
         self.log.info(seq_message) 
-            
+             
         # instantiate sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,
                                  fasta_df,
                                  self.output_dir,
-                                 self.client)
-          
+                                 self.client,
+                                 self.cpus)
+           
         molecule_seqs = sequence.main()
+
+#         molecule_seqs = pd.read_pickle("./molecule_seqs.p")
 
         print("Sequencing successfully completed!")
         
@@ -402,7 +410,9 @@ class ShortStack():
         # instantiate sequencing module from sequencer.py
         consensus = cons.Consensus(molecule_seqs,
                                  fasta_df,
-                                 self.output_dir)
+                                 self.output_dir, 
+                                 self.client,
+                                 self.cpus)
            
            
         consensus.main()
@@ -435,7 +445,6 @@ if __name__ == "__main__":
                 diversity_threshold=config.getint("internal_options", "diversity_threshold"),
                 max_hamming_dist=config.getint("internal_options", "max_hamming_dist"),
                 hamming_weight=config.getint("internal_options", "hamming_weight"),
-                all_fov=config.getboolean("internal_options", "all_fov"),
                 ftm_HD0=config.getboolean("internal_options", "ftm_HD0"))
 
     sStack.main()
