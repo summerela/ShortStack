@@ -56,7 +56,7 @@ class Sequencer():
         nuc_df = dd.merge(counts, self.tiny_fasta, left_on="groupID", right_on="groupID") 
         nuc_df["pos"] = nuc_df.pos.astype(int) + nuc_df.start.astype(int) 
         nuc_df = nuc_df.drop(["start"], axis=1)
-
+        
         return nuc_df 
     
     @jit
@@ -121,7 +121,7 @@ class Sequencer():
         # sum edge weights
         edge_df["weight"] = edge_df.groupby(["edge1", "edge2"])["count"].transform("sum")
         edge_df.drop("count", axis=1, inplace=True)
- 
+        
         return edge_df
 
         
