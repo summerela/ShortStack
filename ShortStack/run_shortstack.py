@@ -397,9 +397,6 @@ class ShortStack():
 
         print("Sequencing successfully completed!")
         
-        molecule_seqs = pd.read_pickle("molecule_seqs.p")
-        fasta_df = pd.read_pickle("fasta_df.p")
-        
         ####################
         ###   Consensus   ###
         ####################
