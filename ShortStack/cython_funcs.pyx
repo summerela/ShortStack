@@ -66,19 +66,38 @@ def calc_hamming(str a, str b, int maxHD):
     return (a,b,c)
 
 
-def calc_symmetricDiff(targets):
+def calc_symmetricDiff(x):
     '''
     purpose: find reads that are unique to a target/feature
     input: dataframe of perfect matches
     output: 
     '''
     # create list of target sets for all potential targets
-    cdef list result  
+    cdef list result, targets  
 
     result = []
+    #  take the set of each target list for the feature
+    targets = [set(i) for i in x.target_list.values] 
   
     for set_element in targets:
         result.append(len(set_element.difference(set.union(*[x for x in targets if x is not set_element]))))
 
     return result
+
+# 
+# def calc_symmetricDiff(targets):
+#     '''
+#     purpose: find reads that are unique to a target/feature
+#     input: dataframe of perfect matches
+#     output: 
+#     '''
+#     # create list of target sets for all potential targets
+#     cdef list result  
+# 
+#     result = []
+#   
+#     for set_element in targets:
+#         result.append(len(set_element.difference(set.union(*[x for x in targets if x is not set_element]))))
+# 
+#     return result
 
