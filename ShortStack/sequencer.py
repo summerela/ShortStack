@@ -30,13 +30,14 @@ class Sequencer():
                  counts,
                  fasta_df,
                  out_dir,
-                 client):
+                 client,
+                 cpus):
     
         self.counts = counts
         self.fasta_df = fasta_df
         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
         self.output_dir = out_dir
-        self.cpus = psutil.cpu_count() - 3
+        self.cpus = cpus
         self.client = client
      
     @jit   
