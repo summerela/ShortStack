@@ -17,6 +17,7 @@ import dask
 from dask import dataframe as dd
 import numpy as np
 import warnings
+from dask.dataframe.io.tests.test_parquet import npartitions
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
@@ -191,10 +192,10 @@ class Parse_files():
         print("Reading in S6 file...\n")
         
         # specify S6 datatypes
-        dtypes = {'Features':'str',
-          'fov': 'uint8',
-          'x': 'uint8',
-          'y': 'uint8'}
+        dtypes = {'Features':'object',
+          'fov': 'object',
+          'x': 'object',
+          'y': 'object'}
         
         # read in S6 file and create feature id's
         df = dd.read_csv(input_s6, dtype=dtypes, blocksize=1024*1024)
@@ -203,7 +204,6 @@ class Parse_files():
         
         # Remove cheeky comma column, if it exists
         df = df.loc[:,~df.columns.str.contains('^Unnamed')]
-        
         # Remove whitespace from column headers
         df.columns = df.columns.str.strip()
         
@@ -260,7 +260,7 @@ class Parse_files():
         # save raw call data to file
         s6_df_outfile = Path("{}/all3spotters.tsv".format(self.output_dir))
         s6_df.to_csv(s6_df_outfile, sep="\t", index=False)
-        
+
         return s6_df
 
     
