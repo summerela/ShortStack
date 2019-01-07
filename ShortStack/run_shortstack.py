@@ -50,6 +50,8 @@ python run_shortstack.py -c path/to/config.txt
 #### import packages required to load modules ####
 import logging    # create log file
 import logging.config     # required for seqlog formatting
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import os    # traverse/operations on directories and files
 import time    # time/date stamp for log
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
@@ -66,6 +68,7 @@ from pathlib import Path
 import psutil
 import pyximport; pyximport.install()
 import dask
+from dask.distributed import Client
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
 import warnings
@@ -116,6 +119,7 @@ class ShortStack():
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0 = ftm_HD0
         self.cpus = psutil.cpu_count()/1.5
+        self.client = Client(name="ShortStack",memory_limit='100GB')
 
         # initialize file paths and output dirs
         self.log_path = log_path
@@ -219,8 +223,7 @@ class ShortStack():
         error_message = "Check that {} exists and is not empty.".format(input_file)
         input_file = Path(input_file)
         assert (input_file.is_file()) and (input_file.stat().st_size > 0), error_message
-
-
+    
     def main(self):
         '''
         purpose: main function to run shortstack
@@ -245,7 +248,8 @@ class ShortStack():
                                         self.target_fa,
                                         self.mutation_vcf, 
                                         self.encoding_file,
-                                        self.cpus)
+                                        self.cpus, 
+                                        self.client)
                       
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
         s6_df = dd.from_pandas(s6_df, npartitions=self.cpus)
@@ -258,7 +262,8 @@ class ShortStack():
         encode = encoder.Encode_files(s6_df, 
                                       encoding_df, 
                                       self.output_dir,
-                                      self.cpus)
+                                      self.cpus, 
+                                      self.client)
                   
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
@@ -277,8 +282,7 @@ class ShortStack():
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
                                           mutation_df, 
-                                          s6_df,
-                                          self.cpus)  
+                                          s6_df)  
             # add mutated reference sequences to fasta_df        
             mutant_fasta = mutations.main()
         # no mutations provided = unsupervised mode and mutant_fasta is empty
@@ -303,7 +307,8 @@ class ShortStack():
                               self.diversity_threshold,
                               self.hamming_weight,
                               self.ftm_HD0,
-                              self.cpus
+                              self.cpus,
+                              self.client
                               )
         # run FTM
         all_counts, hamming = run_ftm.main()
@@ -316,7 +321,8 @@ class ShortStack():
         ###   valid off targets   ###
         #############################
         # save valid barcodes that are off target
-              
+        
+        @jit      
         def save_validOffTarget(s6_df, parity_df, hamming_df):
        
             # get basecalls in s6 that are not in invalids
@@ -348,6 +354,8 @@ class ShortStack():
         # clean up
         del parity_df, s6_df
         gc.collect()
+        
+        raise SystemExit("FTM successfully completed.")
  
         ####################
         ###   Sequence   ###
@@ -357,7 +365,8 @@ class ShortStack():
         sequence = seq.Sequencer(all_counts,
                                  fasta_df,
                                  self.output_dir,
-                                 self.cpus)
+                                 self.cpus,
+                                 self.client)
                 
         molecule_seqs = sequence.main()
          
@@ -372,10 +381,13 @@ class ShortStack():
         consensus = cons.Consensus(molecule_seqs,
                                  fasta_df,
                                  self.output_dir, 
-                                 self.cpus)
+                                 self.cpus,
+                                 self.client)
            
            
         consensus.main()
+        
+        self.client.close()
         
         print("ShortStack successfully completed.")
         
