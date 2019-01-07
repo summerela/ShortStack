@@ -3,6 +3,8 @@ module for parsing input files for shortstack
 
 '''
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 import re, io, os, logging
 import allel
@@ -13,12 +15,10 @@ import swifter
 from Bio.GenBank.Record import Feature
 from pathlib import Path
 import psutil
-import dask
 from dask import dataframe as dd
-import numpy as np
-import warnings
 from dask.dataframe.io.tests.test_parquet import npartitions
-warnings.simplefilter(action='ignore', category=FutureWarning)
+import numpy as np
+
 
 
 # import logger
@@ -33,7 +33,8 @@ class Parse_files():
                  target_fa, 
                  mutation_file, 
                  encoder_file,
-                 cpus):
+                 cpus,
+                 client):
         
         self.input_s6 = input_s6
         self.output_dir = output_dir
@@ -41,6 +42,7 @@ class Parse_files():
         self.mutation_file = mutation_file
         self.encoder_file = encoder_file
         self.cpus = cpus
+        self.client = client
     
     @jit        
     def test_cols(self, input_df, df_name, required_cols):
@@ -178,6 +180,7 @@ class Parse_files():
 
         return fasta_df
 
+    @jit
     def read_s6(self, input_s6):
         
         # specify S6 datatypes
@@ -199,6 +202,7 @@ class Parse_files():
 
         return df
     
+
     def melt(self, frame, id_vars=None, value_vars=None, var_name=None,
          value_name='value', col_level=None):
 
@@ -233,6 +237,7 @@ class Parse_files():
 
         return s6_df
     
+    @jit
     def filter_s6(self, input_s6):
 
         # filter out rows where basecall contains uncalled bases of 0 
@@ -246,7 +251,6 @@ class Parse_files():
 
         return s6_df
 
-    
     def main_parser(self):
         
         try:
