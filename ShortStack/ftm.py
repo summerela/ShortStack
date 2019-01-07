@@ -6,6 +6,8 @@ ftm.py
 - returns FTM calls
 '''
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import logging
 import cython_funcs as cpy
 from numba import jit
@@ -20,7 +22,6 @@ from collections import defaultdict
 from itertools import chain     
 import psutil 
 from dask.array.random import normal
-from numpy import hamming
 
 # import logger
 log = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class FTM():
                  mutant_fasta, coverage_threshold, 
                  max_hamming_dist,
                  output_dir, diversity_threshold,
-                 hamming_weight, ftm_HD0, cpus):
+                 hamming_weight, ftm_HD0, cpus, client):
         self.fasta_df = fasta_df
         self.encoded_df = encoded_df
         self.mutant_fasta = mutant_fasta
@@ -44,6 +45,7 @@ class FTM():
         self.kmer_lengths = [int(x) for x in list(set(self.encoded_df.bc_length.values))]
         self.cpus = cpus
         self.ftm_HD0 = ftm_HD0
+        self.client = client
         
     @jit
     def create_fastaDF(self, input_fasta, input_vcf):
