@@ -2,12 +2,13 @@
 module for matching s6 calls to probes
 '''
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import pandas as pd
 import logging
 import numpy as np
 from numba import jit
 from pathlib import Path
-import dask
 import dask.dataframe as dd
 import multiprocessing as mp
 
@@ -19,13 +20,14 @@ log = logging.getLogger(__name__)
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df, output_dir, cpus):
+    def __init__(self, s6_df, encoding_df, output_dir, cpus, client):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
         self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
         self.cpus = cpus
+        self.client = client
     
     @jit        
     def map_basecalls(self, s6_df, encoding_df):
@@ -64,7 +66,7 @@ class Encode_files():
         assert len(encoded_df) != 0, "No valid barcodes found in encoding file."
        
         return encoded_df
-    
+    @jit
     def main(self, s6_df, encoded_df):
         mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df).reset_index(drop=True)
