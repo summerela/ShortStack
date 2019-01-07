@@ -16,19 +16,16 @@ import pyximport; pyximport.install()
 import cython_funcs as cpy
 import swifter
 from numba import jit
-import dask
-import dask.dataframe as dd
 
 # import logger
 log = logging.getLogger(__name__)
 
 class AssembleMutations():
     
-    def __init__(self, fasta_df, mutation_df, s6_df, cpus):
+    def __init__(self, fasta_df, mutation_df, s6_df):
         self.fasta_df = fasta_df.reset_index(drop=True)
         self.mutation_df = mutation_df.reset_index(drop=True)
         self.s6_df = s6_df
-        self.cpus = cpus
 
     def mutation_checker(self):
         '''
@@ -179,7 +176,7 @@ class AssembleMutations():
         mutant_fasta = pd.DataFrame(valid_dict, columns=valid_dict.keys())
 
         return mutant_fasta
-                   
+         
     def main(self):
         '''
         Purpose: run all functions to assemble mutated sequences
