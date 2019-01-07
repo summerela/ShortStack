@@ -11,9 +11,8 @@ encoding_table=./example_files/encoding.txt
 mutation_vcf=./example_files/kras_nras_mutant.vcf
 
 [internal_options]
-kmer_length=6
 qc_threshold=7
-max_hamming_dist=1
+max_hamming_dist=0
 covg_threshold=4
 diversity_threshold=3
 ftm_HD0=True

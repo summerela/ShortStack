@@ -12,7 +12,6 @@ import re
 import swifter
 from collections import defaultdict, Counter
 from pathlib import Path
-from dask.distributed import Client
 import dask
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
@@ -27,14 +26,12 @@ class Consensus():
                  molecule_seqs,
                  fasta_df,
                  out_dir,
-                 client,
                  cpus):
     
         self.molecule_seqs = molecule_seqs
         self.fasta_df = fasta_df
         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
         self.output_dir = out_dir
-        self.client = client
         self.cpus = cpus
     
     def count_molecules(self, x):
@@ -58,86 +55,83 @@ class Consensus():
                     nuc_weight = 1
                 
                 nucs[key][nuc] +=  nuc_weight
+                
+        nucs = pd.DataFrame(nucs).T
        
         return nucs
     
-    def get_MAF(self, groupID, nuc_counts, sample_size):
+
+    def get_MAF(self, group):
         
-        # get allele count per position
-        freqs = pd.DataFrame(nuc_counts).T
+        sample_size = group.shape[0]
         
         # replace NaN with 0
-        freqs = freqs.fillna(0)
+        freqs = group.fillna(0)
+        freqs = freqs.reset_index()
+        freqs.columns = ["id", "pos", "A", "C", "G", "T", "N"]
+        freqs["samp_size"]= sample_size
         
+        # convert to dask for speed
         freq_dd = dd.from_pandas(freqs, npartitions=self.cpus)
-        
+         
+        # create list of col names
+        freq_cols = freq_dd.columns
+         
+        # if N column not found for chunk, add column for downstream concat
+        if "N" not in freq_cols:
+            freq_dd["N"] = 0.0
+        else:
+            freq_dd["N"] = freq_dd["N"].astype(float)
+          
         # get frequency per position
-        freq_dd = freq_dd.apply(lambda x: round((x/sample_size * 100),3),
+        freq_counts = freq_dd[["A", "C", "G", "T", "N"]].apply(lambda x: round((x/sample_size * 100),3),
                                                             meta={
                                                                   'A': 'float',
                                                                   'C':'float',
                                                                   'G':'float',
-                                                                  'N':'float',
-                                                                  'T':'float'}, 
+                                                                  'T':'float',
+                                                                  'N':'float'}, 
                                                                  axis=1)
-        # reset index to get position
-        freq_dd = freq_dd.reset_index()
-        freq_dd.columns = ["pos", "A", "C", "G", "N", "T"]
         
-        freq_dd["id"] = str(groupID)
-        freq_dd = freq_dd[["id", "pos", "A", "C", "G", "T", "N"]]
+        # drop raw counts
+        freq_ids = freqs.drop(["A", "C", "G", "T", "N"], axis=1)
         
-        # keep in memory for downstream parsing
-        freq_dd = freq_dd.compute()
+        # merge keys and counts back together
+        freq_df =dd.concat([freq_ids, freq_counts], axis=1).compute()
         
-        return freq_dd
+        # reorder columns
+        freq_df = freq_df[["id", "pos", "samp_size", "A", "T", "G", "C", "N"]]
+        
+        return freq_df
     
     @jit
-    def pos_match(self, freqs, fasta_df):
-        
+    def pos_match(self, group):
         
         # get starting position for each group id
-        freqs = dd.merge(freqs, fasta_df[["id", "start", "chrom"]],
+        freqs = dd.merge(group, self.fasta_df[["id", "start", "chrom"]],
                          on="id")
         
         # label with correct genomic location
         freqs["pos"] = freqs.pos.astype(int) + freqs.start.astype(int)
         freqs = freqs.drop("start", axis=1)
         
+        # parse output
+        freqs = freqs.reset_index(drop=True)
+        freqs = freqs[["id", "chrom", "pos", "samp_size", "A", "T", "G", "C", "N"]]
+       
         return freqs
 
-        
+    @jit  
     def main(self):
         
         maf_list = []
+                
+        freqs = self.molecule_seqs.groupby("region").apply(self.count_molecules)
         
-        # get allele frequencies for each feature
-        print("Calculating allele frequency...\n")
-        for feature, data in self.molecule_seqs.groupby("region"):
-            
-            group_size = data.shape[0]
-
-            groupID = ''.join(data.region.unique())
-            
-            # get base counts
-            freqs = self.count_molecules(data)
-            
-            # calculate allele frequency            
-            maf = self.get_MAF(feature, freqs, group_size)
-            
-
-            # format base counts to allele frequencies
-            maf_df = self.pos_match(maf, self.fasta_df)
-            maf_df = maf_df[["id", "chrom", "pos", "A", "T", "G", "C", "N"]]
-
-            # add regional df to maf_list
-            maf_list.append(maf_df)
+        maf = freqs.groupby("region").apply(self.get_MAF)
         
-        # concatenate maf dataframes for each region
-        print("Formatting output...\n")
-        maf_dfs = dd.multi.concat(maf_list,  interleave_partitions=True)
-        maf_out = maf_dfs.compute()
-
+        maf_df = maf.groupby("region").apply(self.pos_match)
+        
         # save molecule sequences to file
         consensus_out = Path("{}/consensus_maf.tsv".format(self.output_dir))
-        maf_out.to_csv(consensus_out, sep="\t", index=False) 
+        maf_df.to_csv(consensus_out, sep="\t", index=False) 

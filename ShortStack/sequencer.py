@@ -31,7 +31,6 @@ class Sequencer():
                  counts,
                  fasta_df,
                  out_dir,
-                 client,
                  cpus):
     
         self.counts = counts
@@ -39,7 +38,6 @@ class Sequencer():
         self.tiny_fasta = self.fasta_df[["groupID", "start"]]  #subset for faster merging
         self.output_dir = out_dir
         self.cpus = cpus
-        self.client = client
      
     @jit   
     def match_fasta(self, counts):
@@ -92,6 +90,8 @@ class Sequencer():
         
         # persist data frame for downstream analysis
         df = df.compute()
+        
+        df.reset_index(drop=True, inplace=True)
 
         return df
     
@@ -192,15 +192,12 @@ class Sequencer():
         feature_list = self.counts[["FeatureID", "groupID"]].drop_duplicates().reset_index(drop=True)
         
         # convert target sequence to base and position with count
-        print("Matching targets with position..\n")
         split_targets = self.match_fasta(self.counts)
         
         # create graph edges
-        print("Creating graph edges..\n")
         edge_df = self.break_edges(split_targets)
         
         # slit dataframe into edges
-        print("Splitting edges by nucleotide...\n")
         ngrams = self.create_ngrams(edge_df)
 
         # group information by featureID
@@ -209,23 +206,21 @@ class Sequencer():
         # sequence each molecule
         seq_list = []
         
-        print("Creating graph...\n")
         for featureID, group in features:
             groupID = ''.join(group.groupID.unique())
-            
+    
             edge_list = self.create_nodes(group)
 
             edge_df = self.sum_edge_weights(edge_list)
 
             path, graph = self.get_path(edge_df)
             seq = self.trim_path(path, graph)
-            
+
             # parse sequence data
             seq_data = "{},{},{}".format(featureID, groupID, seq)   
             seq_list.append(seq_data)
             
         # save molecule sequences to file
-        print("Saving sequences to file...\n")
         seq_outfile = Path("{}/molecule_seqs.tsv".format(self.output_dir))
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
 

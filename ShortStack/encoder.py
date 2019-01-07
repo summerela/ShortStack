@@ -10,7 +10,6 @@ from pathlib import Path
 import dask
 import dask.dataframe as dd
 import multiprocessing as mp
-from dask.distributed import Client
 
 pd.options.mode.chained_assignment = None
 
@@ -20,13 +19,12 @@ log = logging.getLogger(__name__)
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df, output_dir, client, cpus):
+    def __init__(self, s6_df, encoding_df, output_dir, cpus):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
         self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
-        self.client = client
         self.cpus = cpus
     
     @jit        
@@ -38,18 +36,15 @@ class Encode_files():
             encoding_df = encoding df containing target and color_code columns
         Output: s6_df with target seqs instead of color codes
         '''
-
-        print("Matching basecalls with color encoding")
         # match targets to base calls by merging s6_df and encoding_df
 
         encoded_df = dd.merge(s6_df, encoding_df, how='left', 
                                       right_on=["PoolID", "BC"],
                                       left_on=["pool", "BC"])
-        encoded_df = self.client.persist(encoded_df)
-        
+                
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        parity_df = parity_df.drop(["PoolID", "bc_length"], axis=1).compute()
+        parity_df = parity_df.drop(["PoolID", "bc_length"], axis=1)
         
         if len(parity_df > 0):
             parity_df.to_csv(self.invalids_file, sep="\t", index=False)

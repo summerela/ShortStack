@@ -33,7 +33,6 @@ class Parse_files():
                  target_fa, 
                  mutation_file, 
                  encoder_file,
-                 client,
                  cpus):
         
         self.input_s6 = input_s6
@@ -41,7 +40,6 @@ class Parse_files():
         self.target_fa = target_fa
         self.mutation_file = mutation_file
         self.encoder_file = encoder_file
-        self.client= client
         self.cpus = cpus
     
     @jit        
@@ -64,8 +62,6 @@ class Parse_files():
         format: vcf 4.0 standard format
         output: mutation dataframe with mutation id and genomic position
         '''
-        print("Parsing mutations file:{}".format(self.mutation_file))
-        log.info("Parsing mutations file:{}".format(self.mutation_file))
             
         # read in mutation file, truncate to only one mutation per line
         mutation_df = allel.vcf_to_dataframe(str(self.mutation_file), 
@@ -113,8 +109,6 @@ class Parse_files():
         format: tsv containing at least columns: Pool |Target | Color Index
         output: barcode dataframe
         '''
-        print("Reading in encoding file from: {}".format(self.encoder_file))
-        log.info("Reading in encoding file from: {}".format(self.encoder_file))
 
         required_cols = ["PoolID", "Target", "BC", "bc_length"]
         encoding = pd.read_csv(self.encoder_file, sep="\t", header=0,
@@ -141,9 +135,6 @@ class Parse_files():
         input: self.fasta_df
         output: list of fasta headers and seqs to be fed into parse_fasta()
         '''
-    
-        print("Parsing fasta file: {}".format(self.target_fa))
-        log.info("Parsing fasta file: {}".format(self.target_fa))
 
         # read in fasta using cython_funcs.split_fasta()
         info_list, seq_list = cpy.split_fasta(self.target_fa)
@@ -189,8 +180,6 @@ class Parse_files():
 
     def read_s6(self, input_s6):
         
-        print("Reading in S6 file...\n")
-        
         # specify S6 datatypes
         dtypes = {'Features':'object',
           'fov': 'object',
@@ -199,8 +188,6 @@ class Parse_files():
         
         # read in S6 file and create feature id's
         df = dd.read_csv(input_s6, dtype=dtypes, blocksize=1024*1024)
-        # persist df in memory for downstream analysis
-        df = self.client.persist(df)
         
         # Remove cheeky comma column, if it exists
         df = df.loc[:,~df.columns.str.contains('^Unnamed')]
@@ -221,11 +208,9 @@ class Parse_files():
                                     value_vars=value_vars,
                                     var_name=var_name, value_name=value_name,
                                     col_level=col_level, token='melt')
-    
+
     @jit
     def pivot_s6(self, input_s6):
-        
-        print("Parsing S6 file...\n")
         
         # expand basecalls to one row per feature
         s6_df = self.melt(input_s6, id_vars="FeatureID")
@@ -249,9 +234,7 @@ class Parse_files():
         return s6_df
     
     def filter_s6(self, input_s6):
-        
-        print("Filtering S6 file...\n")
-        
+
         # filter out rows where basecall contains uncalled bases of 0 
         pass_calls = input_s6[input_s6.BC.str.contains("0") == False]
         # filter out rows with missing digits (non 3 spotters)

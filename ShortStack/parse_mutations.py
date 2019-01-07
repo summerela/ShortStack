@@ -18,7 +18,6 @@ import swifter
 from numba import jit
 import dask
 import dask.dataframe as dd
-from dask.distributed import Client
 
 # import logger
 log = logging.getLogger(__name__)
@@ -104,8 +103,6 @@ class AssembleMutations():
         input: valid mutation dataframe
         output: will throw an error if mutations listed in vcf are not found in ref sequence
         '''
-        
-        print("Checking that input mutations are within range of input fasta file.")
 
         # check that first ref position of mutation matches wt sequence
         npt.assert_array_equal(valid_mutations.apply(lambda x: x['ref_seq'][x['var_start']], axis=1),
@@ -150,7 +147,6 @@ class AssembleMutations():
                and fasta_df imported on init from run_shortstack.py
         output: adds var seq as an entry to fasta_df with var id
         '''
-        print("Creating variant sequences from input VCF file.")
          
         # calculate length of mutation
         valid_mutations['mut_length'] = 1 # initialize column with 1 so we don't have to calc snv's
