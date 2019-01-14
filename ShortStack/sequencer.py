@@ -246,10 +246,6 @@ class Sequencer():
         final_countdown.set_index("featureID", inplace=True)
         final_countdown.reset_index(drop=False, inplace=True)
          
-        pd.to_pickle(final_countdown, "./final_countdown.p")
-         
-        final_countdown = pd.read_pickle("./final_countdown.p")
-         
         # get max weighted base and create final sequence
         max_df = final_countdown.groupby("featureID").apply(self.get_max)
         # get featureID back into dataset
