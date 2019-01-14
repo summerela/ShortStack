@@ -559,6 +559,7 @@ class FTM():
         # order dataframes
         perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
         
+        # if ftm only considers HD0 and max ham dist is not 0
         if self.ftm_HD0 and self.max_hamming_dist > 0:
             
             # locate multi-mapped hd1+ barcodes and add counts
@@ -581,25 +582,31 @@ class FTM():
             hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
     
             # concatenate dataframe
-            all_counts = pd.concat([perfect_calls, hd_counts])
-            
+            all_counts = dd.concat([perfect_calls, hd_counts],
+                                    interleave_partitions=True)
+        
+        # otherwise no need to worry about hd1+   
         else:
             
-            all_counts = perfect_calls
+            all_counts = dd.from_pandas(perfect_calls,
+                                        npartitions=self.cpus)
+            
+        # subset all counts for only ftm called region
+        ftm_counts = dd.merge(all_counts, ftm_df, on=["FeatureID", "groupID"]).compute()
         
-        all_counts = all_counts.sort_values(by=["FeatureID", 
-                                        "pos",
-                                        "groupID", 
+        ftm_counts = ftm_counts.sort_values(by=["FeatureID", 
+                                        "groupID",
+                                        "pos", 
                                         "Target"], 
                                         axis=0, 
                                         ascending=True, 
                                         inplace=False)
-        all_counts.reset_index(inplace=True, drop=True)
+        ftm_counts.reset_index(inplace=True, drop=True)
         
-        counts_file = Path("{}/all_ftm_counts.tsv".format(self.output_dir))
-        all_counts.to_csv(counts_file, sep="\t", index=False)
+        counts_file = Path("{}/ftm_counts.tsv".format(self.output_dir))
+        ftm_counts.to_csv(counts_file, sep="\t", index=False)
 
-        return all_counts
+        return ftm_counts
         
     def main(self):
         
@@ -651,10 +658,10 @@ class FTM():
         perfect_calls = self.return_calls(ftm, bc_counts)
         
         # filter hd1+ to only ftm called features and combine with perfects
-        all_counts = self.return_all_calls(hd_plus, ftm, perfect_calls)
+        ftm_counts = self.return_all_calls(hd_plus, ftm, perfect_calls)
 
         # return ftm matches and feature_div filtered non-perfects
-        return all_counts, hamming_df
+        return ftm_counts, hamming_df
     
     
     

@@ -271,7 +271,7 @@ class Sequencer():
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
 
-        return seq_df
+        return seq_df, ref_df
         
 
 ### graph solution ###

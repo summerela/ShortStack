@@ -84,20 +84,3 @@ def calc_symmetricDiff(x):
 
     return result
 
-# 
-# def calc_symmetricDiff(targets):
-#     '''
-#     purpose: find reads that are unique to a target/feature
-#     input: dataframe of perfect matches
-#     output: 
-#     '''
-#     # create list of target sets for all potential targets
-#     cdef list result  
-# 
-#     result = []
-#   
-#     for set_element in targets:
-#         result.append(len(set_element.difference(set.union(*[x for x in targets if x is not set_element]))))
-# 
-#     return result
-

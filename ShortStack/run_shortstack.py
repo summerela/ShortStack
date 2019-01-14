@@ -51,7 +51,7 @@ python run_shortstack.py -c path/to/config.txt
 import logging    # create log file
 import logging.config     # required for seqlog formatting
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=Warning) # ignore dask connection warnings until I find a way to resolve tcp issues
 import os    # traverse/operations on directories and files
 import time    # time/date stamp for log
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
@@ -102,7 +102,6 @@ class ShortStack():
                  encoding_table="./base_files/encoding.txt",  
                  log_path = "./",
                  qc_threshold=7,
-                 num_cores=6,
                  diversity_threshold=2,
                  covg_threshold=2,
                  max_hamming_dist=1,
@@ -111,15 +110,15 @@ class ShortStack():
         
         # gather run options
         self.qc_threshold = int(qc_threshold)
-        self.num_cores= int(psutil.cpu_count() - 3) #leave at least 3 cores
         self.encoding_file = encoding_table
         self.covg_threshold = int(covg_threshold)
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0 = ftm_HD0
-        self.cpus = psutil.cpu_count()/1.5
-        self.client = Client(name="ShortStack",memory_limit='100GB')
+        self.cpus = int(psutil.cpu_count()/1.5)
+        self.client = Client(name="ShortStack",memory_limit='100GB',
+                             n_workers=self.cpus, threads_per_worker=4)
 
         # initialize file paths and output dirs
         self.log_path = log_path
@@ -238,7 +237,7 @@ class ShortStack():
         self.file_check(self.encoding_file)
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
-             
+                      
         #########################
         ####   Parse Input   ####
         #########################
@@ -250,11 +249,11 @@ class ShortStack():
                                         self.encoding_file,
                                         self.cpus, 
                                         self.client)
-                      
+                               
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
         s6_df = dd.from_pandas(s6_df, npartitions=self.cpus)
         s6_df = s6_df.compute()
-        
+                 
         ########################
         ####   Encode S6    ####
         ########################
@@ -264,14 +263,14 @@ class ShortStack():
                                       self.output_dir,
                                       self.cpus, 
                                       self.client)
-                  
+                           
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                
+                         
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-                
+                         
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -290,13 +289,13 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-        
+                 
         ###############
         ###   FTM   ###
         ###############
         align_message = "Running FTM...\n"
         print(align_message)
-           
+                    
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -312,51 +311,49 @@ class ShortStack():
                               )
         # run FTM
         all_counts, hamming = run_ftm.main()
-                
+                         
         # cleanup 
         del encoded_df, mutant_fasta
         gc.collect()
-                   
+                          
         #############################
         ###   valid off targets   ###
         #############################
         # save valid barcodes that are off target
-        
+              
         @jit      
         def save_validOffTarget(s6_df, parity_df, hamming_df):
-       
+               
             # get basecalls in s6 that are not in invalids
             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True)
-                   
+                           
             # pull out feature id's/basecalls that are only in s6_df and not in invalids
             no_invalids = no_invalids[no_invalids._merge == "left_only"]
             no_invalids = no_invalids.drop(["_merge", "Target"], axis=1)
-                           
+                                   
             # prep hamming_df for merge
             hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
             hamming_df = hamming_df.drop_duplicates()
-                   
+                           
             # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
             valid_offTargets = dd.merge(no_invalids, hamming_df, on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True) 
             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-                   
-            valid_offTargets = valid_offTargets.compute()
                            
+            valid_offTargets = valid_offTargets.compute()
+                                   
             # save to file
             valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
             valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-               
+                       
         save_validOffTarget(s6_df, parity_df, hamming)
-               
+                       
         # clean up
-        del parity_df, s6_df
+        del parity_df, s6_df, hamming
         gc.collect()
-        
-        raise SystemExit("FTM successfully completed.")
- 
+  
         ####################
         ###   Sequence   ###
         ####################
@@ -367,19 +364,17 @@ class ShortStack():
                                  self.output_dir,
                                  self.cpus,
                                  self.client)
-                
-        molecule_seqs = sequence.main()
-         
-#         molecule_seqs = pd.read_pickle("./molecule_seqs.p")
-#         fasta_df = pd.read_pickle("./fasta_df.p")
-        
+                    
+        molecule_seqs, ref_df = sequence.main()
+
+
         ####################
         ###   Consensus   ###
         ####################
         print("Calculating allele frequencies...\n") 
         # instantiate sequencing module from sequencer.py
         consensus = cons.Consensus(molecule_seqs,
-                                 fasta_df,
+                                 ref_df,
                                  self.output_dir, 
                                  self.cpus,
                                  self.client)
