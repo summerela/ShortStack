@@ -54,8 +54,12 @@ class Consensus():
                 weight = tuple[2]
                 
                 nucs[key][nuc] +=  weight
-                
-        nucs = pd.DataFrame(nucs).T
+        
+        nucs = pd.DataFrame.from_dict(nucs,
+                                      orient='index')
+        nucs = nucs.reset_index(drop=False)
+        nucs.columns = ["pos", "N", "G", "C", "A", "T"]
+
         nucs["samp_size"] = sample_size
         nucs = nucs.fillna(0)
 
@@ -68,47 +72,51 @@ class Consensus():
             .apply(lambda x: round((x/group.samp_size * 100),3), axis=0)
 
         # reorder columns
-        group = group[["region", "samp_size", "A", "T", "G", "C", "N"]]
-        
+        group = group[["region", "pos", "samp_size", "A", "T", "G", "C", "N"]]
+                               
         return group
     
     @jit
-    def pos_match(self, group):
+    def pos_match(self, group, ref_df):
         
         # pull out region
         group_region = group.region.unique()[0]
-        group = group.reset_index()
-        group.columns = ["pos", "region", "samp_size",
-                         "A", "T", "G", "C", "N"]
-        
+         
         # pull out ref seqs that match group region
-        refs = self.ref_df[self.ref_df.region == group_region]
-        
+        refs = ref_df[ref_df.region == group_region]
+         
         # correct starting position to reference
         start_pos = int(min(refs.pos))
         group["pos"] = group.pos.astype(int) + start_pos
-        
-        # get starting position for each group id
-        group["pos"] = group.pos.astype(int)
-        refs["pos"] = refs.pos.astype(int)
-        freqs = pd.merge(group, refs,
-                         on=["region", "pos"])
-       
-        return freqs
+         
+        return group
 
     @jit  
     def main(self):
         
-        maf_list = []
-           
         # count nucleotides by base for each region      
         freqs = self.molecule_seqs.groupby("region").apply(self.count_molecules)
         freqs = freqs.reset_index()
+        freqs = freqs.drop("level_1", axis=1)
 
         # get maf for each region
         maf = freqs.groupby("region").apply(self.get_MAF)
         
-        maf_df = maf.groupby("region").apply(self.pos_match)
+        # add reference position
+        maf_df = maf.groupby("region").apply(self.pos_match, self.ref_df)
+        maf_df = maf_df.reset_index(drop=True)
+        
+#         # prep dataframes for merge
+#         maf_df["pos"] = maf_df.pos.astype('int')
+#         maf_df = pd.DataFrame(maf_df)
+#     
+#         self.ref_df["pos"] = self.ref_df.pos.astype('int')
+#         self.ref_df.reset_index(inplace=True, drop=True)
+#         
+#         # merge dataframes
+#         seq_df = pd.merge(maf_df, self.ref_df,
+#                           how='left',
+#                         on=["region", "pos"])
 
         # save molecule sequences to file
         consensus_out = Path("{}/consensus_maf.tsv".format(self.output_dir))
