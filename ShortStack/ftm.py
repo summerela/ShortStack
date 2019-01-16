@@ -110,18 +110,21 @@ class FTM():
         '''
         
         # get group information back from fasta_df
-        ngrams = ngrams.merge(fasta_df[["id", "groupID"]], 
+        ngrams = ngrams.merge(fasta_df[["id", "groupID", "start"]], 
                              left_on="gene", 
                              right_on="id")
         
+        # add proper start position from fasta
+        ngrams["pos"] = ngrams.pos.astype(int) + ngrams.start.astype(int)
+        
         # differntiate ngram  wt and all vars
-        ngrams_unique = ngrams.drop("id", axis=1)
+        ngrams_unique = ngrams.drop(["id", "start"], axis=1)
         ngrams_unique = pd.DataFrame(ngrams_unique)
         
         # subset all non-duplicated ngrams for each gene region
         group_ngrams = ngrams_unique.drop("gene", axis=1)
         group_ngrams = pd.DataFrame(group_ngrams)
-
+        
         return ngrams_unique, group_ngrams
        
     def find_hammingDist(self, ngram_df, encoded_df):
@@ -176,11 +179,12 @@ class FTM():
         hamming_df = hamming_df.drop(["ngram", "PoolID"], axis=1)
         
         # reorder columns
-        hamming_df = hamming_df[["FeatureID", "Target", "BC", "cycle", "pool",
-                                 "groupID", "pos", "ref_match", "hamming"]]
+        hamming_df = hamming_df[["FeatureID", "groupID", "pos", "Target", "ref_match", 
+                                 "BC", "cycle", "pool", "hamming"]]
         
         hamming_df["hamming"] = hamming_df.hamming.astype(int)
         hamming_df = hamming_df.compute()
+        hamming_df = hamming_df.sort_values(by=["FeatureID", "pos"])
 
         # save raw hamming counts to file
         hamming_df.to_csv(self.raw_count_file , sep="\t", index=None)
@@ -539,7 +543,7 @@ class FTM():
             
         # pull out only calls related to FTM called region for HD under threshold   
         calls = ftm_df.merge(bc_counts, on=["FeatureID", "groupID"])
-        calls = calls.drop(["counts", "feature_div"], axis=1)
+        calls = calls.drop(["counts"], axis=1)
 
         return calls
     
@@ -557,8 +561,9 @@ class FTM():
         ftm_df = ftm_df.drop(["counts"], axis=1)
         
         # order dataframes
-        perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
-        
+        perfect_calls = perfect_calls[["FeatureID", "groupID", "Target", 
+                                       "pos", "hamming", "bc_count", "feature_div"]]
+        raise SystemExit(perfect_calls.head())
         # if ftm only considers HD0 and max ham dist is not 0
         if self.ftm_HD0 and self.max_hamming_dist > 0:
             
@@ -579,7 +584,8 @@ class FTM():
             # drop old counts per basecall to keep count per position
             hd_counts.drop(["counts", "ref_match"],axis=1, inplace=True)
             
-            hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", "hamming", "bc_count"]]
+            hd_counts = hd_counts[["FeatureID", "groupID", "Target", "pos", 
+                                   "hamming", "bc_count", "feature_div"]]
     
             # concatenate dataframe
             all_counts = dd.concat([perfect_calls, hd_counts],
@@ -659,6 +665,7 @@ class FTM():
         
         # filter hd1+ to only ftm called features and combine with perfects
         ftm_counts = self.return_all_calls(hd_plus, ftm, perfect_calls)
+        raise SystemExit(ftm_counts.head())
 
         # return ftm matches and feature_div filtered non-perfects
         return ftm_counts, hamming_df
