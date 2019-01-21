@@ -57,9 +57,8 @@ class Consensus():
         
         nucs = pd.DataFrame.from_dict(nucs,
                                       orient='index')
-        nucs = nucs.reset_index(drop=False)
-        nucs.columns = ["pos", "N", "G", "C", "A", "T"]
-
+ 
+        # add sample size and replace NaN with 0
         nucs["samp_size"] = sample_size
         nucs = nucs.fillna(0)
 
@@ -73,22 +72,8 @@ class Consensus():
 
         # reorder columns
         group = group[["region", "pos", "samp_size", "A", "T", "G", "C", "N"]]
-                               
-        return group
-    
-    @jit
-    def pos_match(self, group, ref_df):
-        
-        # pull out region
-        group_region = group.region.unique()[0]
-         
-        # pull out ref seqs that match group region
-        refs = ref_df[ref_df.region == group_region]
-         
-        # correct starting position to reference
-        start_pos = int(min(refs.pos))
-        group["pos"] = group.pos.astype(int) + start_pos
-         
+        group = group.fillna(0)
+                              
         return group
 
     @jit  
@@ -97,27 +82,27 @@ class Consensus():
         # count nucleotides by base for each region      
         freqs = self.molecule_seqs.groupby("region").apply(self.count_molecules)
         freqs = freqs.reset_index()
-        freqs = freqs.drop("level_1", axis=1)
+        freqs = freqs.drop(["level_1"], axis=1)
 
         # get maf for each region
         maf = freqs.groupby("region").apply(self.get_MAF)
         
-        # add reference position
-        maf_df = maf.groupby("region").apply(self.pos_match, self.ref_df)
-        maf_df = maf_df.reset_index(drop=True)
+        raise SystemExit(maf)
         
-#         # prep dataframes for merge
-#         maf_df["pos"] = maf_df.pos.astype('int')
-#         maf_df = pd.DataFrame(maf_df)
-#     
-#         self.ref_df["pos"] = self.ref_df.pos.astype('int')
-#         self.ref_df.reset_index(inplace=True, drop=True)
-#         
-#         # merge dataframes
-#         seq_df = pd.merge(maf_df, self.ref_df,
-#                           how='left',
-#                         on=["region", "pos"])
+        # prep dataframes for merge
+        maf["pos"] = maf.pos.astype('int')
+        self.ref_df["pos"] = self.ref_df.pos.astype('int')
+        self.ref_df.reset_index(inplace=True, drop=True)
+         
+        # merge dataframes
+        seq_df = pd.merge(maf, self.ref_df,
+                          how='left',
+                        on=["region", "pos"])
+        
+
+        seq_df.columns = ["region", "pos", "sample_size", "ref_nuc",
+                          "A", "T", "G", "C", "N"]
 
         # save molecule sequences to file
         consensus_out = Path("{}/consensus_maf.tsv".format(self.output_dir))
-        maf_df.to_csv(consensus_out, sep="\t", index=False) 
+        seq_df.to_csv(consensus_out, sep="\t", index=False) 

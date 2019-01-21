@@ -12,10 +12,10 @@ mutation_vcf=./example_files/kras_nras_mutant.vcf
 
 [internal_options]
 qc_threshold=7
-max_hamming_dist=0
+max_hamming_dist=1
 covg_threshold=4
 diversity_threshold=3
-ftm_HD0=True
+ftm_HD0_only=True
 
 ### DO NOT EDIT THIS SECTION ###
 [DEFAULT]
@@ -30,4 +30,4 @@ covg_threshold=3
 hamming_weight=1
 mutation_vcf=None
 logfile_path=./
-ftm_HD0=True
+ftm_HD0_only=True

@@ -171,10 +171,12 @@ class Parse_files():
         # test that the fasta contains information
         assert not fasta_df.empty, "FASTA does not contain any information"
         fasta_df["chrom"] = fasta_df["chrom"].str.replace("chrom", '').str.replace("chr", '')
-        
+
         # test that no two mutation ID's are the same
         assert fasta_df["id"].nunique() == fasta_df.shape[0], "FASTA contains duplicates."
-        fasta_df["groupID"] = fasta_df["id"]
+        
+        # assume that fasta only contains one wt per region
+        fasta_df["region"] = fasta_df["id"]
 
         fasta_df = fasta_df.reset_index(drop=True)
 

@@ -37,51 +37,33 @@ class Sequencer():
     
         self.counts = counts
         self.fasta_df = fasta_df
-        self.tiny_fasta = self.fasta_df[["groupID", "chrom", "start"]]  #subset for faster merging
+        self.tiny_fasta = self.fasta_df[["region", "chrom", "start"]]  #subset for faster merging
         self.output_dir = out_dir
         self.cpus = cpus
         self.client = client
-      
-    @jit   
-    def match_fasta(self, counts):
-        '''
-        purpose: split target reads into individual bases
-        input: all_ftm_counts created in ftm.return_all_counts()
-        output: individual bases, positions and counts per base
-        '''   
-         
-        # convert counts to dask 
-        counts = dd.from_pandas(counts, npartitions=self.cpus)
-        
-        # pull start position from fasta_df
-        nuc_df = dd.merge(counts, self.tiny_fasta, left_on="groupID", right_on="groupID") 
-        nuc_df["pos"] = nuc_df.pos.astype(int) + nuc_df.start.astype(int)
-        nuc_df = nuc_df.drop(["start","hamming"], axis=1) 
- 
-        return nuc_df 
-     
+          
     def break_edges(self, df):
          
         # break apart reads into edges
+        df = dd.from_pandas(df, npartitions=self.cpus)
         df["nuc"] = df.Target.apply(lambda x: cpy.ngrams(x, 1))
+        df = df.drop(["feature_div", "hamming"], axis=1)
+        df = df.compute()
 
         return df
     
-    def position_edges(self, df):
+    def position_edges(self, x):
         '''
         purpose: break apart edges into start_pos:nuc, stop_pos:nuc, count tuples
         input: df created in create_ngrams containing list of edges in nuc column
         output: edge dataframe edge_df containing one row for each featureID
         '''
         
-        edge_list = df.apply(lambda row: [(row.FeatureID, 
-                                          row.groupID,
-                                          row.chrom, 
-                                          str(row.pos + i), 
-                                           c,
-                    row.bc_count) for i, c in enumerate(row.nuc)],
-                    axis=1,
-                    meta='object')
+        edge_list = [(x.FeatureID, 
+                      x.region,
+                      str(int(x.pos) + i),
+                      c,
+                      x.bc_count) for i,c in enumerate(x.nuc)]
 
         return edge_list
      
@@ -93,7 +75,6 @@ class Sequencer():
         output: dataframe of start stop and count for each edge
         '''
         # convert list to datafame
-        edge_list = edge_list.compute()
         df = pd.DataFrame(edge_list.tolist())
 
         # unravel tuples to dataframe
@@ -103,7 +84,7 @@ class Sequencer():
         # parse final edge dataframe output
         result = pd.DataFrame(melted['edge'].values.tolist())
         result = result.reset_index(drop=True)
-        result.columns = ["featureID", "region", "chrom", "pos", "nuc", "count"]
+        result.columns = ["featureID", "region", "pos", "nuc", "bc_count"]
 
         return result
     
@@ -116,10 +97,10 @@ class Sequencer():
         '''
         
         # sum edge weights
-        edge_df["weight"] = edge_df.groupby(["featureID", "pos", "nuc"])["count"].transform('sum')
-        
+        edge_df["weight"] = edge_df.groupby(["featureID", "pos", "nuc"])["bc_count"].transform('sum')
+         
         # parse output
-        edge_df = edge_df.drop("count", axis=1)
+        edge_df = edge_df.drop("bc_count", axis=1)
         edge_df = edge_df.drop_duplicates()
         edge_df.sort_values(by=["featureID", "pos", "nuc", "weight"])
 
@@ -127,12 +108,14 @@ class Sequencer():
     
     def ref_seqs(self):
         
-        # break apart reads into edges
-        fasta_df = dd.from_pandas(self.fasta_df[["groupID", "id", "start"]], 
+        # break apart sequences into list of ngrams
+        fasta_df = dd.from_pandas(self.fasta_df[["region", "id", "start"]], 
                                   npartitions=self.cpus)
         fasta_df["nucs"] = self.fasta_df.seq.apply(lambda x: cpy.ngrams(x, 1))
-        
+
+        # match edge grams with position
         fasta_df = fasta_df.apply(lambda row: [(row.id, 
+                                                row.region,
                                   str(int(row.start) + i), 
                                   c) for i, c in enumerate(row.nucs)],
                                   axis=1,
@@ -153,7 +136,8 @@ class Sequencer():
         # parse final edge dataframe output
         result = pd.DataFrame(melted['edge'].values.tolist())
         result = result.reset_index(drop=True)
-        result.columns = ["region", "pos", "ref_nuc"]
+
+        result.columns = ["id", "region", "pos", "ref_nuc"]
 
         # clean up new line chars that appear at 1+ end of seq
         ref_df = result[result.ref_nuc != "\n"]
@@ -166,30 +150,27 @@ class Sequencer():
     @jit
     def add_refs(self, group, ref_df):
         
+        # pull out identifiers
         feature_id = group.featureID.unique()[0]
-        chrom = group.chrom.unique()[0]
         group_region = group.region.unique()[0]
         
         # subset ref_df to region
-        no_covg = ref_df[ref_df.region == group_region]
-        
-        # prepare no_covg to find missing bases
-        no_covg["featureID"] = feature_id
-        no_covg["chrom"] = chrom
-        no_covg["weight"] = 0
-        no_covg["nuc"] = "N"
-        no_covg = no_covg[["featureID", "region", "chrom",
-                           "pos", "nuc", "weight"]]
-        
-        # pull out info on all missing bases
-        missing_bases = no_covg[(~no_covg.pos.isin(group.pos))]
-        
-        # add missing bases back into group dataframe
-        group = pd.concat([group, missing_bases]).reset_index(drop=True)
-        # sort by position to grab sequence
-        group = group.sort_values(by="pos")
+        region_df = ref_df[ref_df.region == group_region]
 
-        return group
+        # outer join tables to keep missing bases
+        group_df = group.merge(region_df, on=["region", "pos"],
+                                   how='outer')
+        
+        # fill out missing columns for missing bases
+        group_df["featureID"] = feature_id
+        group_df["weight"][pd.isnull(group_df['weight'])] = 0
+        # change base to N for missing bases
+        group_df["nuc"][pd.isnull(group_df['nuc'])] = "N"
+        
+        # sort by position
+        group_df = group_df.sort_values(by="pos").reset_index(drop=True)
+        
+        return group_df
     
     @jit
     def get_max(self, group):
@@ -197,7 +178,7 @@ class Sequencer():
         # filter for nuc with max weight at each position
         group["nuc_max"] = group.groupby(['pos'])['weight'].transform(max)
         group = group[group.weight == group.nuc_max]
-        
+
         return group
     
     def get_seq(self, group):
@@ -205,67 +186,78 @@ class Sequencer():
         # pull out positions that have more than one possible nuc
         no_ties = group.groupby('pos').filter(lambda x: len(x)==1)
         multis = group.groupby('pos').filter(lambda x: len(x)> 1)
+        print(multis)
         
         # convert ties to "N" **evntually replace with nuc/nuc**
         if not multis.empty:
             multis["nuc"] = "N"  
-            multis = multis.drop_duplicates(subset=["pos", "nuc"])   
+            multis = multis.drop_duplicates(subset=["pos", "nuc"], keep='first')   
             final_counts = pd.concat([no_ties, multis])
             final_counts = final_counts.drop("nuc_max", axis=1)
         else:
             final_counts = no_ties.drop("nuc_max", axis=1)
-
+        
         return final_counts
         
     def main(self):
-         
-        # convert target sequence to base and position with count
-        ngram_df = self.match_fasta(self.counts)
-          
+
         # split apart ngrams lists
-        edge_list_df = self.break_edges(ngram_df)
+        edge_list_df = self.break_edges(self.counts)
           
         # match each nucleotide with position and count
-        edge_list = self.position_edges(edge_list_df)
+        edge_list = edge_list_df.apply(lambda x: self.position_edges(x), axis=1)
           
         # parse edge list from lists of tuples to df
         edge_df = self.split_edges(edge_list)
           
         # sum edge weights
         weighted_df = self.sum_edge_weights(edge_df)        
-         
+        
         # create reference df
         ref_df = self.ref_seqs()
-         
+        
         # parse ref_df
         ref_df = self.parse_ref(ref_df)
-         
+
         # add ref position of N for bases with no coverage
         final_countdown = weighted_df.groupby("featureID").apply(self.add_refs, ref_df)
         # get featureID back into dataset
         final_countdown.set_index("featureID", inplace=True)
-        final_countdown.reset_index(drop=False, inplace=True)
-         
+        final_countdown.reset_index(drop=False, inplace=True) 
+        
+               
         # get max weighted base and create final sequence
         max_df = final_countdown.groupby("featureID").apply(self.get_max)
         # get featureID back into dataset
         max_df.set_index("featureID", inplace=True)
         max_df = max_df.reset_index(drop=False)
+
          
-        # save sequences to file for consensus
-        seq_df = max_df.groupby('featureID').apply(self.get_seq)
+        # get ref info and save molecule counts to a file
+        molecule_df = max_df.groupby('featureID').apply(self.get_seq)
+        molecule_df = molecule_df.reset_index(drop=True)
+        molecule_df = molecule_df.merge(ref_df, on=["region", "pos"])
+        molecule_df = molecule_df.sort_values(by=["featureID", "pos"])
+        molecule_count = "{}/molecule_counts.tsv".format(self.output_dir)
+        molecule_df.to_csv(molecule_count, sep="\t", index=False)
         
+        # save sequences to file for consensus
         seq_list = []
-        for feature, data in seq_df.groupby("featureID"):
+        for feature, data in molecule_df.groupby("featureID"):
             
             region = ''.join(data.region.unique())
-            seq_data = "{},{},{}".format(feature, region, ''.join(data.nuc.values))
+            seq_data = "{},{},{}".format(feature, 
+                                             region, 
+                                             ''.join(data.nuc.values))
             seq_list.append(seq_data)
               
         # save molecule sequences to file
         seq_outfile = "{}/molecule_seqs.tsv".format(self.output_dir)
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
+        
+        # coerce ref_df position back to int
+        ref_df["pos"] = ref_df.pos.astype(int)
 
         return seq_df, ref_df
         

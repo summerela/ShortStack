@@ -41,7 +41,7 @@ class AssembleMutations():
         # check that mutations are within chrom, start, stop, strand of any ref seq
         query = '''select m_df.chrom, m_df.pos,
             m_df.id as var_id, m_df.ref, m_df.alt,
-            f_df.id as groupID, m_df.mut_type, m_df.strand, 
+            f_df.id as region, m_df.mut_type, m_df.strand, 
             f_df.seq as ref_seq, f_df.start as ref_start, f_df.build
             from m_df  
             inner join f_df  
@@ -169,7 +169,7 @@ class AssembleMutations():
                       "stop":(valid_mutations["ref_start"].astype(int) + valid_mutations["mut_length"].astype(int)),
                       "seq":valid_mutations["alt_seq"],
                       "strand":valid_mutations["strand"],
-                      "groupID":valid_mutations["groupID"]
+                      "region":valid_mutations["region"]
                       }
         
         # convert to pandas dataframe to pass to dask
