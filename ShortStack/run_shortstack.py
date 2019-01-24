@@ -281,14 +281,6 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-             
-        pd.to_pickle(fasta_df, "./fasta_df.p")
-        pd.to_pickle(encoded_df, "./encoded_df.p")
-        pd.to_pickle(mutant_fasta, "./mutant_df.p")
-
-#         fasta_df = pd.read_pickle("./fasta_df.p")
-#         encoded_df = pd.read_pickle("./encoded_df.p")
-#         mutant_fasta = pd.read_pickle("./mutant_df.p")
                         
         ###############
         ###   FTM   ###
