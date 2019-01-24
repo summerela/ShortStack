@@ -48,32 +48,23 @@ python run_shortstack.py -c path/to/config.txt
 '''
 
 #### import packages required to load modules ####
-import logging    # create log file
-import logging.config     # required for seqlog formatting
+import logging, logging.config     # required for seqlog formatting
+import sys, os, time, psutil, gc, dask
 import warnings
-warnings.simplefilter(action='ignore', category=Warning) # ignore dask connection warnings until I find a way to resolve tcp issues
-import os    # traverse/operations on directories and files
-import time    # time/date stamp for log
+if not sys.warnoptions:
+    warnings.simplefilter("ignore") # ignore dask connection warnings until I find a way to resolve tcp issues
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
 from logging.handlers import TimedRotatingFileHandler    # set time limit of 31 days on log files
 import configparser as cp   # parse config files 
 import argparse    #parse user arguments
 import pandas as pd
-import numpy as np
-import psutil
+import numpy as np 
 import concurrent.futures as cf
 from numba import jit
-import gc
-from pathlib import Path
-import psutil
 import pyximport; pyximport.install()
-import dask
 from dask.distributed import Client
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
 
 # set runtime options
 dask.config.set(shuffle='tasks')
@@ -98,44 +89,45 @@ class ShortStack():
                  input_s6, 
                  target_fa, 
                  mutation_vcf=None,
-                 output_dir=Path.cwd(),
-                 encoding_table="./base_files/encoding.txt",  
+                 output_dir=os.path.curdir,
+                 encoding_table="./encoding.txt",  
                  log_path = "./",
                  qc_threshold=7,
                  diversity_threshold=2,
                  covg_threshold=2,
                  max_hamming_dist=1,
                  hamming_weight=1,
-                 ftm_HD0_only=True):
+                 ftm_HD0_only=True,
+                 ftm_only=False):
         
         # gather run options
         self.qc_threshold = int(qc_threshold)
-        self.encoding_file = encoding_table
         self.covg_threshold = int(covg_threshold)
         self.diversity_threshold = int(diversity_threshold)
         self.max_hamming_dist = int(max_hamming_dist)
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0_only = ftm_HD0_only
+        self.ftm_only = ftm_only
         self.cpus = int(psutil.cpu_count()/1.5)
         self.client = Client(name="ShortStack",memory_limit='100GB',
                              n_workers=self.cpus, threads_per_worker=4)
 
         # initialize file paths and output dirs
-        self.log_path = log_path
-        self.output_dir =  Path("{}/output".format(output_dir))
-        self.running_dir =  Path(__file__).parents[0]
-        self.config_path = Path(config_path)
+        self.encoding_file = os.path.abspath(encoding_table)
+        self.log_path = os.path.abspath(log_path)
+        self.output_dir =  os.path.join(output_dir, "output")
+        self.config_path = os.path.abspath(config_path)
 
         # create output dir if not exists
         self.create_outdir(self.output_dir)
             
         # gather input file locations
-        self.input_s6 = Path(input_s6)
-        self.target_fa = Path(target_fa)
+        self.input_s6 = os.path.abspath(input_s6)
+        self.target_fa = os.path.abspath(target_fa)
         self.mutation_vcf = mutation_vcf
         
         if self.mutation_vcf.lower() != "none": 
-            self.mutation_vcf = Path(mutation_vcf)
+            self.mutation_vcf = os.path.abspath(mutation_vcf)
             self.file_check(self.mutation_vcf)
         else:
             self.mutation_vcf = "none"
@@ -144,7 +136,7 @@ class ShortStack():
         today = time.strftime("%Y%m%d")
         now = time.strftime("%Y%d%m_%H:%M:%S")
         today_file = "{}_ShortStack.log".format(today)
-        log_file = Path(Path(self.log_path) / Path(today_file))
+        log_file = os.path.join(self.log_path, today_file)
         FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
         logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
                             format=FORMAT)
@@ -205,11 +197,11 @@ class ShortStack():
         :return: directory created
         '''
         try:
-            if not output_dir.is_dir():
+            if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
         except AssertionError as e:
             error_message = "Unable to create output dir at: {}".format(output_dir, e)
-            self.log.error(error_message)
+            log.error(error_message)
             raise SystemExit(error_msg)
     
     @jit 
@@ -220,8 +212,8 @@ class ShortStack():
         output: assertion error if file not found or is empty
         '''
         error_message = "Check that {} exists and is not empty.".format(input_file)
-        input_file = Path(input_file)
-        assert (input_file.is_file()) and (input_file.stat().st_size > 0), error_message
+        input_file = os.path.abspath(input_file)
+        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
     
     def main(self):
         '''
@@ -237,7 +229,7 @@ class ShortStack():
         self.file_check(self.encoding_file)
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
-                              
+                               
         #########################
         ####   Parse Input   ####
         #########################
@@ -249,11 +241,11 @@ class ShortStack():
                                         self.encoding_file,
                                         self.cpus, 
                                         self.client)
-                                       
+                                        
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
         s6_df = dd.from_pandas(s6_df, npartitions=self.cpus)
         s6_df = s6_df.compute()
-                         
+                          
         ########################
         ####   Encode S6    ####
         ########################
@@ -263,14 +255,14 @@ class ShortStack():
                                       self.output_dir,
                                       self.cpus, 
                                       self.client)
-                                   
+                                    
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                                 
+                                  
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-                                 
+                                  
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -289,6 +281,14 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
+             
+        pd.to_pickle(fasta_df, "./fasta_df.p")
+        pd.to_pickle(encoded_df, "./encoded_df.p")
+        pd.to_pickle(mutant_fasta, "./mutant_df.p")
+
+#         fasta_df = pd.read_pickle("./fasta_df.p")
+#         encoded_df = pd.read_pickle("./encoded_df.p")
+#         mutant_fasta = pd.read_pickle("./mutant_df.p")
                         
         ###############
         ###   FTM   ###
@@ -310,23 +310,20 @@ class ShortStack():
                               self.client
                               )
         # run FTM
-        all_counts, hamming_df = run_ftm.main()
+        all_counts, hamming_df, ftm_calls = run_ftm.main()
                       
         # cleanup 
         del encoded_df, mutant_fasta
         gc.collect()
-        
-        raise SystemExit("Still working on seq/consensus....")
-         
-                                
+                                 
         #############################
         ###   valid off targets   ###
         #############################
         # save valid barcodes that are off target
-                    
-        @jit      
-        def save_validOffTarget(s6_df, parity_df, hamming_df):
                      
+        @jit      
+        def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
+                      
             # get basecalls in s6 that are not in invalids
             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True)
@@ -334,35 +331,44 @@ class ShortStack():
             # pull out feature id's/basecalls that are only in s6_df and not in invalids
             no_invalids = no_invalids[no_invalids._merge == "left_only"]
             no_invalids = no_invalids.drop(["_merge", "Target"], axis=1)
-                                         
+                                          
             # prep hamming_df for merge
-            hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
+            hamming_df = dd.from_pandas(hamming_df[["FeatureID", "BC", "cycle", "pool"]], npartitions=self.cpus)
             hamming_df = hamming_df.drop_duplicates()
-                                 
+                                  
             # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
             valid_offTargets = dd.merge(no_invalids, hamming_df, on=['FeatureID','BC', 'pool', 'cycle'], 
                        how='left', indicator=True) 
             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-                                 
-            valid_offTargets = valid_offTargets.compute()
+                       
+            # pull out features with ftm votes
+            final_offTargets = valid_offTargets[~valid_offTargets.FeatureID.isin(ftm_calls.FeatureID)]
+            
+            # compute data frame                      
+            final_offTargets = final_offTargets.compute()
+            
+            # sort output
+            final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
+                                                                "cycle", "BC"])
                                          
             # save to file
-            valids_off_out = Path("{}/valid_offTargets.tsv".format(self.output_dir))
-            valid_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-                             
-        save_validOffTarget(s6_df, parity_df, hamming_df)
-                             
+            valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
+            final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
+                              
+        save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
+                              
         # clean up
         del parity_df, s6_df, hamming_df
         gc.collect()
-         
-#         pd.to_pickle(all_counts, "./all_counts.p")
-#         pd.to_pickle(fasta_df, "./fasta_df.p")
         
-#         fasta_df = pd.read_pickle("./fasta_df.p")
-#         all_counts = pd.read_pickle("./all_counts.p")
-     
+        # check for ftm_only option
+        if self.ftm_only:
+            ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
+            raise SystemExit(ftm_message)
+        else:
+            print("FTM complete. Sequencing results.")
+
         ####################
         ###   Sequence   ###
         ####################
@@ -375,8 +381,6 @@ class ShortStack():
                                  self.client)
                         
         molecule_seqs, ref_df = sequence.main()
-        
-        
 
         ####################
         ###   Consensus   ###
@@ -417,6 +421,7 @@ if __name__ == "__main__":
                 diversity_threshold=config.getint("internal_options", "diversity_threshold"),
                 max_hamming_dist=config.getint("internal_options", "max_hamming_dist"),
                 hamming_weight=config.getint("internal_options", "hamming_weight"),
-                ftm_HD0_only=config.getboolean("internal_options", "ftm_HD0_only"))
+                ftm_HD0_only=config.getboolean("internal_options", "ftm_HD0_only"),
+                ftm_only=config.getboolean("user_facing_options", "ftm_only"))
 
     sStack.main()

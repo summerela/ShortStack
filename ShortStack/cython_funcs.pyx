@@ -80,9 +80,7 @@ def calc_symmetricDiff(x):
     targets = [set(i) for i in x.target_list.values] 
   
     for set_element in targets:
-        set_u = set.union(*[x for x in targets if x is not set_element])
-        set_len = len(set_element.difference(set_u))
-        result.append(set_len)
+        result.append(len(set_element.difference(set.union(*[x for x in targets if x is not set_element]))))
 
     return result
 

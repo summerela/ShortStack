@@ -1,14 +1,13 @@
 '''
 module for matching s6 calls to probes
 '''
-
+import sys, os, logging
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import pandas as pd
-import logging
 import numpy as np
 from numba import jit
-from pathlib import Path
 import dask.dataframe as dd
 import multiprocessing as mp
 
@@ -25,7 +24,7 @@ class Encode_files():
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
-        self.invalids_file = Path("{}/invalids.tsv".format(self.out_dir))
+        self.invalids_file = os.path.join(self.out_dir, "invalids.tsv")
         self.cpus = cpus
         self.client = client
     

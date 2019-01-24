@@ -3,18 +3,15 @@ module for parsing input files for shortstack
 
 '''
 
+import sys, re, io, os, logging, allel, swifter, psutil
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import pandas as pd
-import re, io, os, logging
-import allel
 import pyximport; pyximport.install()
 import cython_funcs as cpy
 from numba import jit
-import swifter
 from Bio.GenBank.Record import Feature
-from pathlib import Path
-import psutil
 from dask import dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
 import numpy as np
@@ -248,7 +245,7 @@ class Parse_files():
         s6_df = pass_calls[pass_calls.BC.astype(int) > 111111].compute()
         
         # save raw call data to file
-        s6_df_outfile = Path("{}/all3spotters.tsv".format(self.output_dir))
+        s6_df_outfile = os.path.join(self.output_dir, "all3spotters.tsv")
         s6_df.to_csv(s6_df_outfile, sep="\t", index=False)
 
         return s6_df

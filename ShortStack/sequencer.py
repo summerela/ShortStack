@@ -2,26 +2,21 @@
 sequencer.py
 
 '''
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-import logging
+import sys, warnings, logging, re, os, swifter, dask, psutil
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
-import re
-import swifter
 import networkx as nx
 from collections import defaultdict, Counter
-from pathlib import Path
 import multiprocessing as mp
-import dask
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
 from dask.bag.core import split
 dask.config.set(scheduler='tasks')
-import psutil
-import swifter
+
 
 # import logger
 log = logging.getLogger(__name__)
@@ -238,7 +233,7 @@ class Sequencer():
         molecule_df = molecule_df.reset_index(drop=True)
         molecule_df = molecule_df.merge(ref_df, on=["region", "pos"])
         molecule_df = molecule_df.sort_values(by=["featureID", "pos"])
-        molecule_count = "{}/molecule_counts.tsv".format(self.output_dir)
+        molecule_count = os.path.join(self.output_dir, "molecule_counts.tsv")
         molecule_df.to_csv(molecule_count, sep="\t", index=False)
         
         # save sequences to file for consensus
@@ -252,7 +247,7 @@ class Sequencer():
             seq_list.append(seq_data)
               
         # save molecule sequences to file
-        seq_outfile = "{}/molecule_seqs.tsv".format(self.output_dir)
+        seq_outfile = os.path.join(self.output_dir, "molecule_seqs.tsv")
         seq_df = pd.DataFrame([sub.split(",") for sub in seq_list], columns=["FeatureID", "region", "seq"])
         seq_df.to_csv(seq_outfile, sep="\t", index=False)
         

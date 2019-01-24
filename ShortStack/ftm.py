@@ -6,21 +6,20 @@ ftm.py
 - returns FTM calls
 '''
 
+import sys, os, logging, dask, psutil
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-import logging
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
+from numpy import single
 import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
 from collections import Counter
-from pathlib import Path
-import dask
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
 from collections import defaultdict
-from itertools import chain     
-import psutil 
+from itertools import chain      
 from dask.array.random import normal
 
 # import logger
@@ -40,7 +39,7 @@ class FTM():
         self.max_hamming_dist = max_hamming_dist
         self.output_dir = output_dir
         self.diversity_threshold = diversity_threshold
-        self.raw_count_file = Path("{}/rawCounts.tsv".format(self.output_dir))
+        self.raw_count_file = os.path.join(self.output_dir, "rawCounts.tsv")
         self.hamming_weight = hamming_weight
         self.kmer_lengths = [int(x) for x in list(set(self.encoded_df.bc_length.values))]
         self.cpus = cpus
@@ -234,7 +233,7 @@ class FTM():
         # count multi-mapped reads
         diversified["multi"] = diversified.groupby(["FeatureID",
                                            "region",
-                                           "pos"]).Target.transform('count')
+                                           "Target"]).pos.transform('count')
                                            
         diversified = dd.from_pandas(diversified, npartitions=self.cpus)
 
@@ -283,20 +282,11 @@ class FTM():
         # sort counts for nicer output
         bc_counts = bc_counts.sort_values(by=["FeatureID", 
                                         "region", 
-                                        "id",
                                         "Target",
                                         "pos"], 
                                         axis=0, 
                                         ascending=True, 
                                         inplace=False)
-        
-        # save basecall normalized counts to file
-        bc_counts.reset_index(inplace=True, drop=True)
-        counts_outfile = "{}/bc_counts.tsv".format(self.output_dir)
-        
-        bc_counts.to_csv(counts_outfile, sep="\t", 
-                      index=False, 
-                      header=True)
         
         return bc_counts
     
@@ -309,7 +299,7 @@ class FTM():
         '''
         
         # drop columns 
-        bad_cols = ['pool' 'cycle' 'ref_match' 'BC'] 
+        bad_cols = ['pool', 'cycle', 'ref_match', 'BC'] 
         
         for x in bc_counts.columns:
             if x in bad_cols:
@@ -376,7 +366,6 @@ class FTM():
 
         # create list of unique targets for each gene
         target_df["target_list"] = target_df.groupby(["FeatureID", "region"])["Target"].transform('unique')
-        target_df = dd.from_pandas(target_df, npartitions=self.cpus)
         target_df= target_df.drop_duplicates(subset=["FeatureID", "region"],
                                                         keep="first")
         
@@ -384,24 +373,11 @@ class FTM():
         target_df["target_list"] = target_df["target_list"].apply(set)
         
         # calculate Targets unique to each region of interest
-        symDiff = target_df.groupby("FeatureID").apply(cpy.calc_symmetricDiff).compute()
-        symDiff = symDiff.reset_index(drop=False)
-        symDiff.columns = ["FeatureID", "sym_diff"]
+        target_df["sym_diff"] =cpy.calc_symmetricDiff(target_df)
+
+        target_df = target_df.reset_index(drop=True)
         
-        return symDiff
-    
-    def parse_symDiff(self, group, bc_counts):
-        
-        df = self.calc_symDiff(group, bc_counts)
-               
-        # add symmetrical difference to top2
-        symDiff = pd.concat([pd.DataFrame(v, columns=["sym_diff"])
-                     for k,v in df.sym_diff.to_dict().items()]).reset_index()
-        
-        # add sym_diff column to top two df 
-        group["sym_diff"] = symDiff.sym_diff
-        
-        return group
+        return target_df
     
     @jit   
     def decision_tree(self, x, bc_counts):
@@ -431,17 +407,51 @@ class FTM():
          
         # otherwise check symmetrical difference
         else:
-            sym_df = self.parse_symDiff(x, bc_counts)
+            sym_df = self.calc_symDiff(x, bc_counts)
             
             # take top sym_diff score for group
             max_symDiff = sym_df.sym_diff.max()
             
             result = sym_df[sym_df.sym_diff == max_symDiff]
+            
+            result = result.drop("sym_diff", axis=1)
         
         # if no decision at this point, no FTM call    
-        if len(result) != 1:
+        if len(result) == 1:
+            return result
+        else:
             pass
             
+    def find_multis(self, tops, bc_counts):
+        '''
+        purpose: located features that have tied counts for best FTM call
+        input: count_df created in ftm.sum_counts.py
+        output: dataframe of ties and non-tied counts for passing to return_ftm
+        '''
+        
+        # separate ties to process
+        singles = tops.groupby('FeatureID').filter(lambda x: len(x)==1)
+        multis = tops.groupby('FeatureID').filter(lambda x: len(x)> 1)
+        
+        if not multis.empty:
+            
+            # process multis
+            multi_df = multis.groupby("FeatureID").apply(self.decision_tree, bc_counts)
+            
+            # concat results with singles
+            ftm_counts = pd.concat([singles, multis])
+
+        
+        else: 
+            
+            ftm_counts = singles
+    
+        # drop extra columns
+        ftm_counts = ftm_counts[['FeatureID', 'id', 'region', 'feature_div',
+                                 'counts']]
+
+        return ftm_counts
+    
     @jit
     def return_calls(self, ftm_df, hamming_df):
         '''
@@ -461,7 +471,7 @@ class FTM():
            
             # save no_call info to file
             no_ftm = no_calls[["FeatureID"]].drop_duplicates()
-            no_ftm_file = Path("{}/no_ftm_calls.tsv".format(self.output_dir))
+            no_ftm_file = os.path.join(self.output_dir, "no_ftm_calls.tsv")
             no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
             
         # pull out only calls related to FTM called region for HD under threshold   
@@ -470,8 +480,7 @@ class FTM():
                              how="left")
         
         # format columns
-        all_calls = all_calls.drop(["counts", "ref_match_x"
-                           ], axis=1)
+        all_calls = all_calls.drop(["counts"], axis=1)
         
         drop_y = []
         for x in all_calls.columns:
@@ -498,12 +507,14 @@ class FTM():
         # group counts together for each bar code
         all_BCcounts = self.barcode_counts(all_norm)
         
-        new_cols = []
-        for x in all_BCcounts.columns:
-            x = x.strip("_x")
-            new_cols.append(x)
-        all_BCcounts.columns = new_cols   
+        return all_BCcounts
+    
+    def format_allCounts(self, all_BCcounts):
         
+        # using for as since jit doesn't work with list comprehension
+        all_BCcounts.columns = [x.strip("_x") for x in all_BCcounts.columns] 
+        
+        # sort output for saving to file
         all_BCcounts = all_BCcounts.sort_values(by=["FeatureID", 
                                         "region",
                                         "pos", 
@@ -512,8 +523,8 @@ class FTM():
                                         ascending=True, 
                                         inplace=False)
         all_BCcounts.reset_index(inplace=True, drop=True)
-        
-        counts_file = Path("{}/ftm_counts.tsv".format(self.output_dir)) 
+
+        counts_file = os.path.join(self.output_dir, "all_counts.tsv") 
         all_BCcounts.to_csv(counts_file, sep="\t", index=False)
 
         return all_BCcounts
@@ -553,6 +564,14 @@ class FTM():
             
         # group counts together for each bar code
         bc_counts = self.barcode_counts(norm_counts)
+        # save basecall normalized counts to file
+        bc_counts.reset_index(inplace=True, drop=True)
+        counts_outfile = os.path.join(self.output_dir, "bc_counts.tsv")
+        
+        # save barcode counts to file
+        bc_counts.to_csv(counts_outfile, sep="\t", 
+                      index=False, 
+                      header=True)
             
         # sum counts for each region
         region_counts = self.regional_counts(bc_counts)
@@ -562,21 +581,17 @@ class FTM():
             
         # pull out top 2 best options
         top2 = self.find_tops(maxes)
-           
-        # make FTM calls and save to file
-        ftm_calls = top2.groupby("FeatureID").apply(self.decision_tree, bc_counts)
+        
+        # separate and proces features with more than one 
+        # possible ftm call
+        ftm_calls = self.find_multis(top2, bc_counts)
         
         if not ftm_calls.empty:
         
-            # format df
-            ftm_calls = ftm_calls.drop(["max_count", 
-                                        "second_max", 
-                                        "id", "pos",
-                                        "Target"], axis=1).reset_index(drop=True) 
             ftm_calls["counts"] = ftm_calls.counts.astype(float).round(2)
   
             # output ftm to file
-            ftm_file = Path("{}/ftm_calls.tsv".format(self.output_dir))
+            ftm_file = os.path.join(self.output_dir, "ftm_calls.tsv")
             ftm_calls.to_csv(ftm_file, sep="\t", index=False)
   
         else: 
@@ -588,7 +603,10 @@ class FTM():
         # filter all counts 
         all_counts = self.filter_allCalls(all_calls, div_threshold)
         
-        return all_counts, hamming_df
+        # format final output
+        all_counts = self.format_allCounts(all_counts)
+
+        return all_counts, hamming_df, ftm_calls
 
         
        

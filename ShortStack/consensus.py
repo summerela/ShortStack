@@ -2,21 +2,18 @@
 consensus.py
 
 '''
+import sys, re, swifter, psutil, os
 import warnings
-from dask.dataframe.methods import sample
-warnings.simplefilter(action='ignore', category=FutureWarning)
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import logging
 import cython_funcs as cpy
 from numba import jit
 import numpy as np
 import pandas as pd
-import re
-import swifter
 from collections import defaultdict, Counter
-from pathlib import Path
 import dask.dataframe as dd
 from dask.dataframe.io.tests.test_parquet import npartitions
-import psutil
 
 # import logger
 log = logging.getLogger(__name__)
@@ -104,5 +101,5 @@ class Consensus():
                           "A", "T", "G", "C", "N"]
 
         # save molecule sequences to file
-        consensus_out = Path("{}/consensus_maf.tsv".format(self.output_dir))
+        consensus_out = os.path.join(self.output_dir, "consensus_maf.tsv")
         seq_df.to_csv(consensus_out, sep="\t", index=False) 

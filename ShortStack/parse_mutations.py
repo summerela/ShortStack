@@ -8,13 +8,14 @@ vcf assumptions:
 - ref and alt strings must include base before the event
 
 '''
-import logging
+import logging, os, sys, swifter, warnings
+if not sys.warnoptions:
+    warnings.simplefilter("ignore")
 import pandas as pd
 import pandasql as psql
 import numpy.testing as npt
 import pyximport; pyximport.install()
 import cython_funcs as cpy
-import swifter
 from numba import jit
 
 # import logger
