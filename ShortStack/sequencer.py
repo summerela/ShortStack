@@ -104,12 +104,16 @@ class Sequencer():
     def ref_seqs(self):
         
         # break apart sequences into list of ngrams
-        fasta_df = dd.from_pandas(self.fasta_df[["region", "id", "start"]], 
+        fasta_dd = dd.from_pandas(self.fasta_df[["region", "id", "start", "seq"]], 
                                   npartitions=self.cpus)
-        fasta_df["nucs"] = self.fasta_df.seq.apply(lambda x: cpy.ngrams(x, 1))
+        
+        # remove end line character
+        fasta_dd["seq"] = fasta_dd.seq.str.strip()
+        
+        fasta_dd["nucs"] = fasta_dd.seq.apply(lambda x: cpy.ngrams(x, 1))
 
         # match edge grams with position
-        fasta_df = fasta_df.apply(lambda row: [(row.id, 
+        fasta_df = fasta_dd.apply(lambda row: [(row.id, 
                                                 row.region,
                                   str(int(row.start) + i), 
                                   c) for i, c in enumerate(row.nucs)],
@@ -139,7 +143,7 @@ class Sequencer():
 
         # sort and add weight of 0 
         ref_df = ref_df.sort_values(by=["region", "pos", "ref_nuc"])
-
+        ref_df = ref_df.reset_index(drop=True)
         return ref_df
     
     @jit
@@ -173,6 +177,7 @@ class Sequencer():
         # filter for nuc with max weight at each position
         group["nuc_max"] = group.groupby(['pos'])['weight'].transform(max)
         group = group[group.weight == group.nuc_max]
+        group = group.drop("nuc_max", axis=1)
 
         return group
     
@@ -181,18 +186,19 @@ class Sequencer():
         # pull out positions that have more than one possible nuc
         no_ties = group.groupby('pos').filter(lambda x: len(x)==1)
         multis = group.groupby('pos').filter(lambda x: len(x)> 1)
-        print(multis)
         
-        # convert ties to "N" **evntually replace with nuc/nuc**
-        if not multis.empty:
-            multis["nuc"] = "N"  
-            multis = multis.drop_duplicates(subset=["pos", "nuc"], keep='first')   
-            final_counts = pd.concat([no_ties, multis])
-            final_counts = final_counts.drop("nuc_max", axis=1)
-        else:
-            final_counts = no_ties.drop("nuc_max", axis=1)
+        return multis
         
-        return final_counts
+#         # convert ties to "N" **evntually replace with nuc/nuc**
+#         if not multis.empty:
+#             multis["nuc"] = "N"  
+#             multis = multis.drop_duplicates(subset=["pos", "nuc"], keep='first')   
+#             final_counts = pd.concat([no_ties, multis])
+#             final_counts = final_counts.drop("nuc_max", axis=1)
+#         else:
+#             final_counts = no_ties.drop("nuc_max", axis=1)
+#         
+#         return final_counts
         
     def main(self):
 
@@ -200,17 +206,19 @@ class Sequencer():
         edge_list_df = self.break_edges(self.counts)
           
         # match each nucleotide with position and count
-        edge_list = edge_list_df.apply(lambda x: self.position_edges(x), axis=1)
+        edge_list = edge_list_df.apply(lambda x: self.position_edges(x), 
+                                       axis=1)
           
         # parse edge list from lists of tuples to df
         edge_df = self.split_edges(edge_list)
-          
+        
         # sum edge weights
         weighted_df = self.sum_edge_weights(edge_df)        
-        
+         
         # create reference df
         ref_df = self.ref_seqs()
-        
+        ref_df.to_csv("./test.tsv", sep="\t", index=False)
+ 
         # parse ref_df
         ref_df = self.parse_ref(ref_df)
 
@@ -219,17 +227,19 @@ class Sequencer():
         # get featureID back into dataset
         final_countdown.set_index("featureID", inplace=True)
         final_countdown.reset_index(drop=False, inplace=True) 
-        
-               
+                       
         # get max weighted base and create final sequence
         max_df = final_countdown.groupby("featureID").apply(self.get_max)
         # get featureID back into dataset
         max_df.set_index("featureID", inplace=True)
         max_df = max_df.reset_index(drop=False)
-
+        
          
         # get ref info and save molecule counts to a file
         molecule_df = max_df.groupby('featureID').apply(self.get_seq)
+        raise SystemExit(molecule_df.head())
+        
+        
         molecule_df = molecule_df.reset_index(drop=True)
         molecule_df = molecule_df.merge(ref_df, on=["region", "pos"])
         molecule_df = molecule_df.sort_values(by=["featureID", "pos"])

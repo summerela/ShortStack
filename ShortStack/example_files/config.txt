@@ -9,7 +9,7 @@ input_s6=./example_files/krasNras_S6.csv
 target_fa=./example_files/kras_nras.fa
 encoding_table=./example_files/encoding.txt
 mutation_vcf=./example_files/kras_nras_mutant.vcf
-ftm_only=True
+ftm_only=False
 
 [internal_options]
 qc_threshold=7

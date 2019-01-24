@@ -407,15 +407,18 @@ class FTM():
          
         # otherwise check symmetrical difference
         else:
-            sym_df = self.calc_symDiff(x, bc_counts)
+            sym_diff = self.calc_symDiff(x, bc_counts)
+            
+            group = x.merge(sym_diff[["FeatureID", "region", "sym_diff"]],
+                           on=["FeatureID", "region"])
             
             # take top sym_diff score for group
-            max_symDiff = sym_df.sym_diff.max()
+            max_symDiff = group.sym_diff.max()
             
-            result = sym_df[sym_df.sym_diff == max_symDiff]
+            result = group[group.sym_diff == max_symDiff]
             
             result = result.drop("sym_diff", axis=1)
-        
+
         # if no decision at this point, no FTM call    
         if len(result) == 1:
             return result
@@ -474,19 +477,13 @@ class FTM():
             no_ftm.to_csv(no_ftm_file, index=False, sep="\t")
             
         # pull out only calls related to FTM called region for HD under threshold   
-        all_calls = ftm_df.merge(hamming_df, 
+        hd = hamming_df.drop("id", axis=1)
+        all_calls = ftm_df.merge(hd, 
                              on=["FeatureID", "region"],
                              how="left")
         
         # format columns
         all_calls = all_calls.drop(["counts"], axis=1)
-        
-        drop_y = []
-        for x in all_calls.columns:
-            if x.endswith("_y"):
-                drop_y.append(x)
-                
-        all_calls = all_calls.drop(drop_y, axis=1)
         
         # calculate mean diversity for filtering all calls
         div_filter = round(all_calls.feature_div.mean())
@@ -508,10 +505,8 @@ class FTM():
         
         return all_BCcounts
     
+    @jit
     def format_allCounts(self, all_BCcounts):
-        
-        # using for as since jit doesn't work with list comprehension
-        all_BCcounts.columns = [x.strip("_x") for x in all_BCcounts.columns] 
         
         # sort output for saving to file
         all_BCcounts = all_BCcounts.sort_values(by=["FeatureID", 
