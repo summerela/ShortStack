@@ -233,7 +233,7 @@ class FTM():
         # count multi-mapped reads
         diversified["multi"] = diversified.groupby(["FeatureID",
                                            "region",
-                                           "Target"]).pos.transform('count')
+                                           "Target"]).pos.transform('nunique')
                                            
         diversified = dd.from_pandas(diversified, npartitions=self.cpus)
 
@@ -439,8 +439,7 @@ class FTM():
             multi_df = multis.groupby("FeatureID").apply(self.decision_tree, bc_counts)
             
             # concat results with singles
-            ftm_counts = pd.concat([singles, multis])
-
+            ftm_counts = pd.concat([singles, multi_df])
         
         else: 
             
