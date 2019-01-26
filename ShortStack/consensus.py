@@ -4,6 +4,7 @@ consensus.py
 '''
 import sys, re, swifter, psutil, os
 import warnings
+from dask.dataframe.methods import sample
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 import logging
@@ -21,85 +22,102 @@ log = logging.getLogger(__name__)
 class Consensus():
     
     def __init__(self, 
-                 molecule_seqs,
+                 molecule_df,
                  ref_df,
                  out_dir,
                  cpus,
                  client):
     
-        self.molecule_seqs = molecule_seqs
+        self.molecule_df = molecule_df
         self.ref_df = ref_df
         self.output_dir = out_dir
         self.cpus = cpus
         self.client = client
     
-    def count_molecules(self, x):
+    @jit    
+    def weigh_molecules(self, molecule_df):
+        '''
+        purpose: sum weights for each base/position
+        input: molecule_df created as output of sequenceer.py
+        output: molecule_df grouped by region with a sum of weights at eaach pos
+        '''
         
-        sample_size = len(x)
-        
-        nucs = defaultdict(Counter)
-        
-        for edge in x.swifter.apply(
-            lambda row: 
-            [(i,
-             c,
-             1) for i,c in enumerate(row.seq)],
-            axis=1):
-            for tuple in edge:
-                key = tuple[0]
-                nuc = tuple[1]
-                weight = tuple[2]
-                
-                nucs[key][nuc] +=  weight
-        
-        nucs = pd.DataFrame.from_dict(nucs,
-                                      orient='index')
- 
-        # add sample size and replace NaN with 0
-        nucs["samp_size"] = sample_size
-        nucs = nucs.fillna(0)
+        # calculate sample size for each region
+        size_df = dd.from_pandas(molecule_df[["FeatureID", "region"]].drop_duplicates(),
+                                 npartitions=self.cpus)
+        sample_sizes = size_df.groupby('region')['FeatureID'].count().reset_index()
+        sample_sizes.columns = ["region", "sample_size"]
 
-        return nucs
+        # set per molecule weights to 1, unless < 1 then set base to N
+        molecule_df["base"][molecule_df.weight < 1] = "N"
+        molecule_df["weight"][molecule_df.weight > 1] = 1
+        
+        # group by region and sum weights
+        molecule_df["base_weight"] = molecule_df.groupby(["region", "pos", "base"])["weight"].transform('sum')
+        molecule_df = molecule_df.drop(["weight", "FeatureID"],  axis=1)
+        
+        # divide count by sample size to get frequency
+        molecule_df = dd.merge(molecule_df, sample_sizes, 
+                                        on="region",
+                                        how="left")
+
+        return molecule_df
     
-    def get_MAF(self, group):
+    @jit
+    def get_AF(self, molecule_df):
+        '''
+        purpose: divide weights by sample size to get allele frequency
+        input: molecule_df of summed weights from weigh_molecules
+        output: molecule_df with allele frequencies at each position
+        '''
         
         # get frequency per position
-        group[["A", "C", "G", "T", "N"]] = group[["A", "C", "G", "T", "N"]]\
-            .apply(lambda x: round((x/group.samp_size * 100),3), axis=0)
-
-        # reorder columns
-        group = group[["region", "pos", "samp_size", "A", "T", "G", "C", "N"]]
-        group = group.fillna(0)
-                              
-        return group
-
-    @jit  
+        molecule_df["base_freq"] = (molecule_df["base_weight"]/molecule_df["sample_size"]) * 100
+        molecule_df = molecule_df.drop("base_weight", axis=1)
+        
+        return molecule_df
+    
+    @jit
+    def parse_consensus(self, molecule_df):
+        '''
+        purpose: convert format to one row per position for each molecule
+        input: molecule_df 
+        output: final consensus output to output_dir/consensus_counts.tsv
+        '''
+        
+        molecule_df = molecule_df.compute()
+        
+        consensus_df = pd.pivot_table(molecule_df, 
+                                      values = ['base_freq'],
+                                      index=['region','chrom', 
+                                             'pos', 'ref_base', 
+                                             'sample_size'],
+                                      columns='base',
+                                      fill_value=0).reset_index()
+        
+        # sort and parse columns                             
+        consensus_df.columns = consensus_df.columns.droplevel(1)
+        consensus_df.columns = ["region", "chrom", "pos", "ref_base", "sample_size", "A", "C", "G", "N", "T"]
+        consensus_df = consensus_df[["region", "chrom", "pos", "ref_base", "A", "T", "G", "C", "N", "sample_size"]]
+        consensus_df = consensus_df.sort_values(by=["region", "pos"])
+          
+        # save to a file
+        out_file = os.path.join(self.output_dir, "consensus_counts.tsv")   
+        consensus_df.to_csv(out_file, sep="\t", index=False)                         
+        
+        
+        
     def main(self):
         
-        # count nucleotides by base for each region      
-        freqs = self.molecule_seqs.groupby("region").apply(self.count_molecules)
-        freqs = freqs.reset_index()
-        freqs = freqs.drop(["level_1"], axis=1)
-
-        # get maf for each region
-        maf = freqs.groupby("region").apply(self.get_MAF)
+        # set all molecule weights to 1 and sum
+        consensus_weights = self.weigh_molecules(self.molecule_df)
         
-        raise SystemExit(maf)
+        # calculate allele frequencies
+        maf_df = self.get_AF(consensus_weights)
         
-        # prep dataframes for merge
-        maf["pos"] = maf.pos.astype('int')
-        self.ref_df["pos"] = self.ref_df.pos.astype('int')
-        self.ref_df.reset_index(inplace=True, drop=True)
-         
-        # merge dataframes
-        seq_df = pd.merge(maf, self.ref_df,
-                          how='left',
-                        on=["region", "pos"])
+        # parse results and save to file
+        self.parse_consensus(maf_df)
         
+        
+    
 
-        seq_df.columns = ["region", "pos", "sample_size", "ref_nuc",
-                          "A", "T", "G", "C", "N"]
-
-        # save molecule sequences to file
-        consensus_out = os.path.join(self.output_dir, "consensus_maf.tsv")
-        seq_df.to_csv(consensus_out, sep="\t", index=False) 
