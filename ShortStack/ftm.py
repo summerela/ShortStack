@@ -501,27 +501,27 @@ class FTM():
         all_norm = self.locate_multiMapped(all_diversified)
            
         # group counts together for each bar code
-        all_BCcounts = self.barcode_counts(all_norm)
-        
-        return all_BCcounts
+        all_calls = self.barcode_counts(all_norm)
+
+        return all_calls
     
     @jit
-    def format_allCounts(self, all_BCcounts):
+    def format_allCounts(self, all_calls):
         
         # sort output for saving to file
-        all_BCcounts = all_BCcounts.sort_values(by=["FeatureID", 
+        all_calls = all_calls.sort_values(by=["FeatureID", 
                                         "region",
                                         "pos", 
                                         "Target"], 
                                         axis=0, 
                                         ascending=True, 
                                         inplace=False)
-        all_BCcounts.reset_index(inplace=True, drop=True)
+        all_calls.reset_index(inplace=True, drop=True)
 
         counts_file = os.path.join(self.output_dir, "all_counts.tsv") 
-        all_BCcounts.to_csv(counts_file, sep="\t", index=False)
+        all_calls.to_csv(counts_file, sep="\t", index=False)
 
-        return all_BCcounts
+        return all_calls
     
     def main(self):
         
