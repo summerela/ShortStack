@@ -108,9 +108,9 @@ class ShortStack():
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0_only = ftm_HD0_only
         self.ftm_only = ftm_only
-        self.cpus = int(psutil.cpu_count()/1.5)
+        self.cpus = int(psutil.cpu_count()/1.25)
         self.client = Client(name="ShortStack",memory_limit='100GB',
-                             n_workers=self.cpus, threads_per_worker=4)
+                             n_workers=self.cpus, threads_per_worker=20)
 
         # initialize file paths and output dirs
         self.encoding_file = os.path.abspath(encoding_table)
@@ -360,13 +360,6 @@ class ShortStack():
             raise SystemExit(ftm_message)
         else:
             print("FTM complete. Sequencing results.")
-             
-             
-        pd.to_pickle(fasta_df, "./fasta_df.p")
-        pd.to_pickle(all_counts, "./all_counts.p")
- 
-        fasta_df = pd.read_pickle("./fasta_df.p")
-        all_counts = pd.read_pickle("./all_counts.p") 
     
  
         ####################
@@ -384,12 +377,6 @@ class ShortStack():
                                  self.client)
                          
         molecule_df, ref_df = sequence.main()
-         
-        pd.to_pickle(molecule_df, "./molecule_df.p")
-        pd.to_pickle(ref_df,"./ref_df.p")
-        
-#         molecule_df = pd.read_pickle("./molecule_df.p")
-#         ref_df = pd.read_pickle("./ref_df.p")
 
         ####################
         ###   Consensus   ###
@@ -407,6 +394,11 @@ class ShortStack():
         
         # close dask tasks
         self.client.close()
+        
+        # cleanup temp files and directories
+        import shutil
+        dask_folder = os.path.join(os.path.curdir, "dask-worker-space")
+        shutil.rmtree(dask_folder)
         
         print("ShortStack pipline complete.")
         
