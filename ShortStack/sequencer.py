@@ -100,6 +100,9 @@ class Sequencer():
                        id_vars='idx',
                        value_name="nuc").drop("variable", axis=1)
         df = df.set_index("idx")
+        
+        # drop rows with none
+        df = df.dropna(how='any')
               
         return df
     
@@ -285,7 +288,7 @@ class Sequencer():
         # parse output
         full_covg_df.set_index("FeatureID", inplace=True)
         full_covg_df.reset_index(drop=False, inplace=True) 
-        
+                
         # get max weighted base and create final sequence
         max_df = full_covg_df.groupby("FeatureID").apply(self.get_max)
         # get featureID back into dataset
@@ -293,7 +296,7 @@ class Sequencer():
         max_df = max_df.reset_index(drop=False)
         max_df = max_df [["FeatureID", "region", "chrom", "pos", "base", "ref_base", "weight"]]
         max_df = max_df.sort_values(by=["FeatureID", "pos"])
-        
+
         # save molecule counts to file
         mol_counts = os.path.join(self.output_dir, "molecule_counts.tsv")
         max_df.to_csv(mol_counts, sep="\t", index=False)
