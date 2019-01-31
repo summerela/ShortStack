@@ -5,6 +5,7 @@ consensus.py
 import sys, re, swifter, psutil, os
 import warnings
 from dask.dataframe.methods import sample
+from Bio.Nexus.Trees import consensus
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 import logging
@@ -26,13 +27,15 @@ class Consensus():
                  ref_df,
                  out_dir,
                  cpus,
-                 client):
+                 client,
+                 today):
     
         self.molecule_df = molecule_df
         self.ref_df = ref_df
         self.output_dir = out_dir
         self.cpus = cpus
         self.client = client
+        self.today = today
     
     @jit    
     def weigh_molecules(self, molecule_df):
@@ -48,9 +51,11 @@ class Consensus():
         sample_sizes = size_df.groupby('region')['FeatureID'].count().reset_index()
         sample_sizes.columns = ["region", "sample_size"]
 
-        # set per molecule weights to 1, unless < 1 then set base to N
+        # if molecule weight < 1 then set base to N
         molecule_df["base"][molecule_df.weight < 1] = "N"
-        molecule_df["weight"][molecule_df.weight > 1] = 1
+        
+        # set all molecule weights to N
+        molecule_df["weight"] = 1
         
         # group by region and sum weights
         molecule_df["base_weight"] = molecule_df.groupby(["region", "pos", "base"])["weight"].transform('sum')
@@ -64,20 +69,6 @@ class Consensus():
         return molecule_df
     
     @jit
-    def get_AF(self, molecule_df):
-        '''
-        purpose: divide weights by sample size to get allele frequency
-        input: molecule_df of summed weights from weigh_molecules
-        output: molecule_df with allele frequencies at each position
-        '''
-        
-        # get frequency per position
-        molecule_df["base_freq"] = (molecule_df["base_weight"]/molecule_df["sample_size"]) * 100
-        molecule_df = molecule_df.drop("base_weight", axis=1)
-        
-        return molecule_df
-    
-    @jit
     def parse_consensus(self, molecule_df):
         '''
         purpose: convert format to one row per position for each molecule
@@ -88,7 +79,7 @@ class Consensus():
         molecule_df = molecule_df.compute()
         
         consensus_df = pd.pivot_table(molecule_df, 
-                                      values = ['base_freq'],
+                                      values = ['base_weight'],
                                       index=['region','chrom', 
                                              'pos', 'ref_base', 
                                              'sample_size'],
@@ -103,7 +94,74 @@ class Consensus():
           
         # save to a file
         out_file = os.path.join(self.output_dir, "consensus_counts.tsv")   
-        consensus_df.to_csv(out_file, sep="\t", index=False)                         
+        consensus_df.to_csv(out_file, sep="\t", index=False) 
+        
+        return consensus_df
+ 
+    @jit   
+    def find_MAF(self, consensus_df): 
+         
+        # find most frequent allele for each position
+        consensus_df["max_nuc"] = consensus_df[["A", "T", "G", "C", "N"]].idxmax(axis=1)
+         
+        # find rows where the max_nuc does not equal ref_base
+        mafs = consensus_df[consensus_df.ref_base != consensus_df.max_nuc]
+        
+        # calc row total calls
+        mafs["DP"] = mafs[["A", "T", "G", "C", "N"]].sum(axis=1)
+        
+        # add placeholder for QV and NL values
+        mafs["QV"] = 30
+        mafs["NL"] = 5
+        
+        # add (num_ref calls, num_alt calls) 
+        mafs["AD"] =  tuple(zip(mafs.lookup(mafs.index,mafs.ref_base),
+                                mafs.lookup(mafs.index,mafs.max_nuc)))
+        
+        # calculate variant allele freq
+        mafs["VF"] = round(((mafs.lookup(mafs.index,mafs.max_nuc)/mafs["sample_size"]) * 100),2)
+        
+        # add alt nuc
+        mafs["ALT"] = mafs["max_nuc"]
+        mafs["REF"] = mafs["ref_base"]
+        mafs["QUAL"]= "."
+        mafs["FILTER"] = "."
+        
+        # parse into vcf format
+        mafs["INFO"] = "AD=" + mafs.AD.astype(str) + ";" + \
+                       "DP=" + mafs.DP.astype(str) + ";" + \
+                       "QV=" + mafs.QV.astype(str) + ";" + \
+                       "NL=" + mafs.NL.astype(str) + ";" + \
+                       "VF=" + mafs.VF.astype(str)
+        
+        # remove unnecessary columns              
+        mafs = mafs.drop(["DP", "NL", "AD", "VF", "QV", 
+                          "A", "T", "G", "C", "N",
+                          "max_nuc", "ref_base"], axis=1)
+        
+        # reorder columns
+        mafs  = mafs[["chrom", "pos", "REF", "ALT", "QUAL", "FILTER", "INFO"]]
+        
+        return mafs
+         
+    def make_vcf(self, maf_df):  
+        
+        # write VCF header to file
+        today_file = "{}_ShortStack.vcf".format(self.today)
+        output_VCF = os.path.join(self.output_dir, today_file)
+        with open(output_VCF, 'w') as vcf:
+            vcf.write("##fileformat=VCFv4.2\n")
+            vcf.write("##source=ShortStackv0.1.1\n")
+            vcf.write("##reference=GRCh38\n")
+            vcf.write("##referenceMod=file://data/scratch/reference/reference.bin\n")
+            vcf.write("##fileDate:{}\n".format(self.today))
+            vcf.write("##comment='Unreleased dev version. See Summer or Nicole with questions.'\n")
+            vcf.write("##FILTER=<ID=Pass,Description='All filters passed'>\n")
+            vcf.write("##INFO=<ID=GENE, Number=1, Type=String, Description='Gene name'>\n")
+            vcf.write("#CHROM    POS    ID    REF    ALT    QUAL    FILTER    INFO\n")
+             
+        # parse dataframe for vcf output
+        maf_df.to_csv(output_VCF, index=False, sep="\t", header=False, mode='a')                
         
         
         
@@ -112,12 +170,15 @@ class Consensus():
         # set all molecule weights to 1 and sum
         consensus_weights = self.weigh_molecules(self.molecule_df)
         
-        # calculate allele frequencies
-        maf_df = self.get_AF(consensus_weights)
-        
         # parse results and save to file
-        self.parse_consensus(maf_df)
+        consensus_df = self.parse_consensus(consensus_weights)
         
+        # find rows where the major allele varies from the ref allele
+        maf_df = self.find_MAF(consensus_df)
+        raise SystemExit(maf_df.head(100))
+        
+        self.make_vcf(maf_df)
+
         
     
 
