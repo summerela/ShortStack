@@ -91,6 +91,9 @@ class Consensus():
         consensus_df.columns = ["region", "chrom", "pos", "ref_base", "sample_size", "A", "C", "G", "N", "T"]
         consensus_df = consensus_df[["region", "chrom", "pos", "ref_base", "A", "T", "G", "C", "N", "sample_size"]]
         consensus_df = consensus_df.sort_values(by=["region", "pos"])
+        
+        # find most frequent allele for each position
+        consensus_df["max_nuc"] = consensus_df[["A", "T", "G", "C", "N"]].idxmax(axis=1)
           
         # save to a file
         out_file = os.path.join(self.output_dir, "consensus_counts.tsv")   
@@ -100,9 +103,6 @@ class Consensus():
  
     @jit   
     def find_MAF(self, consensus_df): 
-         
-        # find most frequent allele for each position
-        consensus_df["max_nuc"] = consensus_df[["A", "T", "G", "C", "N"]].idxmax(axis=1)
          
         # find rows where the max_nuc does not equal ref_base
         mafs = consensus_df[consensus_df.ref_base != consensus_df.max_nuc]
@@ -175,7 +175,6 @@ class Consensus():
         
         # find rows where the major allele varies from the ref allele
         maf_df = self.find_MAF(consensus_df)
-        raise SystemExit(maf_df.head(100))
         
         self.make_vcf(maf_df)
 
