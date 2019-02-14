@@ -52,6 +52,7 @@ class Consensus():
         sample_sizes.columns = ["region", "sample_size"]
 
         # if molecule weight < 1 then set base to N
+        molecule_df["base"][molecule_df.weight == np.nan] = "N"
         molecule_df["base"][molecule_df.weight < 1] = "N"
         
         # set all molecule weights to N
@@ -76,7 +77,8 @@ class Consensus():
         output: final consensus output to output_dir/consensus_counts.tsv
         '''
         
-        molecule_df = molecule_df.compute()
+        molecule_df = self.client.compute(molecule_df)
+        molecule_df = self.client.gather(molecule_df)
         
         consensus_df = pd.pivot_table(molecule_df, 
                                       values = ['base_weight'],

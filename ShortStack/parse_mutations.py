@@ -173,7 +173,7 @@ class AssembleMutations():
                       "region":valid_mutations["region"]
                       }
         
-        # convert to pandas dataframe to pass to dask
+        # convert to pandas dataframe 
         mutant_fasta = pd.DataFrame(valid_dict, columns=valid_dict.keys())
 
         return mutant_fasta

@@ -65,7 +65,8 @@ class Sequencer():
         # set index to retain information
         count_df["idx"] = count_df.FeatureID + ":" + count_df.region + ":"  + count_df.bc_count.astype(str)
         count_df = count_df.set_index("idx")
-        count_df = count_df.compute()
+        count_df = self.client.compute(count_df)
+        count_df = self.client.gather(count_df)
 
         # split tuples into columns and return back to dask
         base_df = pd.DataFrame(count_df["nuc"].values.tolist(), index=count_df.index).reset_index()
@@ -140,7 +141,8 @@ class Sequencer():
         input: result dataframe created in split_deges
         output: df with summed weights for each nuc per position
         '''
-        df = df.compute()
+        df = self.client.compute(df)
+        df = self.client.gather(df)
         df["weight"] = df.groupby(["FeatureID", "region", "pos", "base"])["counts"].transform('sum')
         df = df.drop("counts", axis=1)
         df = df.drop_duplicates()
@@ -188,14 +190,17 @@ class Sequencer():
         # set index to retain information
         fasta_dd["idx"] = fasta_dd.region + ":" + fasta_dd.chrom
         fasta_dd = fasta_dd.set_index("idx")
-        fasta_dd = fasta_dd.compute()
+        fasta_dd = self.client.compute(fasta_dd)
+        fasta_dd = self.client.gather(fasta_dd)
  
         # split tuples into columns 
         fasta_df = pd.DataFrame(fasta_dd["bases"].values.tolist(), index=fasta_dd.index).reset_index()
         fasta_dd = dd.from_pandas(fasta_df, npartitions=self.cpus)
          
         # split tuples per row into columns
-        fasta_df = self.melt_edges(fasta_dd).compute()
+        fasta_df = self.melt_edges(fasta_dd)
+        fasta_df = self.client.compute(fasta_df)
+        fasta_df = self.client.gather(fasta_df)
 
         # get rid of NaN where some ref seqs were longer than others
         fasta_df = fasta_df.dropna(axis=0, how='any')
@@ -271,7 +276,8 @@ class Sequencer():
               
         # melt columns of tuples into dataframes
         nuc_df = self.melt_edges(munged_df)
-        nuc_df = nuc_df.compute()
+        nuc_df =self.client.compute(nuc_df)
+        nuc_df =self.client.gather(nuc_df)
               
         # split tuples of pos, nuc into columns
         base_df = self.split_tuples(nuc_df)
@@ -337,7 +343,7 @@ class Sequencer():
 #         nuc_df["pos"] = nuc_df.pos.astype(int) + nuc_df.start.astype(int)
 #         nuc_df = nuc_df.drop("start", axis=1) 
 #         
-#         fasta_list = list(set(nuc_df.groupID.values.compute()))
+#         fasta_list = list(set(nuc_df.groupID.values.compute(scheduler='processes', num_workers=self.cpus)))
 # 
 #         return nuc_df, fasta_list
 #     
@@ -385,7 +391,7 @@ class Sequencer():
 #                     str(row.pos + (1 + i)) + ":" + ''.join(c)[1],
 #                     row.bc_count) for i, c in enumerate(row.nuc)],
 #                     axis=1, 
-#                     meta='object').compute()
+#                     meta='object').compute(scheduler='processes', num_workers=self.cpus)
 #            
 #         return edge_df
 #     
