@@ -8,6 +8,7 @@ biopython==1.72
 configparser==3.5.0
 Cython==0.28.2
 dask==0.19.1
+fastparquet
 ipywidgets==7.4.2
 networkx==2.1
 numba==0.38.1
@@ -111,9 +112,10 @@ class ShortStack():
         self.ftm_HD0_only = ftm_HD0_only
         self.ftm_only = ftm_only
         self.mem_limit = psutil.virtual_memory().free - 10000
-        self.cpus = int(psutil.cpu_count()/1.5)
+        self.cpus = int(psutil.cpu_count()/2)-3
         self.client = Client(name="ShortStack",memory_limit=self.mem_limit,
-                             n_workers=self.cpus, threads_per_worker=5,
+                             n_workers=self.cpus, 
+                             threads_per_worker=self.cpus*2,
                              processes=False)
 
         # initialize file paths and output dirs
@@ -247,7 +249,7 @@ class ShortStack():
                                         self.client)
                                                  
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
-                             
+                          
         ########################
         ####   Encode S6    ####
         ########################
@@ -260,7 +262,7 @@ class ShortStack():
                                              
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                          
+                           
         # cleanup encoding_df
         del encoding_df
         gc.collect()
@@ -283,6 +285,10 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
+            
+        fasta_df.to_parquet("./fasta_df", engine='fastparquet')
+        encoded_df.to_parquet("./encoded_df", engine='fastparquet')
+        mutant_fasta.to_parquet("./mutant_fasta", engine='fastparquet')
                                 
         ###############
         ###   FTM   ###

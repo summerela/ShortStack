@@ -56,9 +56,9 @@ class Encode_files():
         
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
-        
-        if len(parity_df > 0):
-            parity_df.to_parquet(self.invalids_file, engine='fastparquet')
+        parity_df = parity_df.drop(["Target", "bc_length"], axis=1)
+            
+        parity_df.to_parquet(self.invalids_file, engine='fastparquet')
          
         return encoded_df, parity_df
     
