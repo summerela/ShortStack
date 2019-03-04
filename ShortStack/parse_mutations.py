@@ -29,6 +29,7 @@ class AssembleMutations():
         self.s6_df = s6_df
 
     def mutation_checker(self):
+        print("Verifying mutations.")
         '''
         purpose: check that input mutations are within genomic range of fasta_df
         input: mutation_df and fasta_df
@@ -63,8 +64,9 @@ class AssembleMutations():
         
         return valid_mutations
     
-    @jit
+    @jit(parallel=True)
     def find_invalids(self, valids): 
+        print("Parsing mutations.")
         '''
         purpose: checks if there are mutations listed in vcf file that do not 
             fall within the range of any input reference sequences
@@ -108,6 +110,7 @@ class AssembleMutations():
          "Ensure mutations in vcf are found within the reference sequence.")
    
     def process_mutations(self, input_df):
+        print("Encoding mutation type.")
         '''
         purpose: create mutated sequences from input vcf file
         input: mutation_df from assemble_mutations
@@ -136,8 +139,9 @@ class AssembleMutations():
 
         return input_df
 
-    @jit
+    @jit(parallel=True)
     def create_mutation_ref(self, valid_mutations):
+        print("Creating reference mutations.")
         '''
         purpose: Create mutation reference sequence from input vcf file 
         for guided,high-qual mode

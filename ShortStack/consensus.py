@@ -37,7 +37,7 @@ class Consensus():
         self.client = client
         self.today = today
     
-    @jit    
+    @jit(parallel=True)    
     def weigh_molecules(self, molecule_df):
         '''
         purpose: sum weights for each base/position
@@ -69,7 +69,7 @@ class Consensus():
 
         return molecule_df
     
-    @jit
+    @jit(parallel=True)
     def parse_consensus(self, molecule_df):
         '''
         purpose: convert format to one row per position for each molecule
@@ -103,7 +103,7 @@ class Consensus():
         
         return consensus_df
  
-    @jit   
+    @jit(parallel=True)   
     def find_MAF(self, consensus_df): 
          
         # find rows where the max_nuc does not equal ref_base

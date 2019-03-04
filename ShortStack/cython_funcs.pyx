@@ -42,27 +42,23 @@ def ngrams(str string, int n):
     ngrams = zip(*[string[i:] for i in range(n)])
     return [''.join(ngram)for ngram in ngrams]
 
-def calc_hamming(str a, str b, int maxHD):
+def calc_hamming(str a, str b, int s, int maxHD):
     '''
     purpose: calculate hamming distance between two strings
     input: ngrams and targets
     output: matrix of hamming distances between each target and ref seq ngram
     '''
-    cdef int len1, len2, k
+    cdef int k
     c = 0
-    len1 = len(a)
-    len2 = len(b)
-    # if seqs are equal length, calc hamming
-    if len1 == len2:
-        for k from 0 <= k < len1:
-            if a[k] != b[k]:
-                if (c < maxHD):
-                    c += 1
-                else:   
-                    c = "X"
-                    break
-    else:
-        c = "X"
+    
+    # calc hamming
+    for k from 0 <= k < s:
+        if a[k] != b[k]:
+            if (c < maxHD):
+                c += 1
+            else:   
+                c = "X"
+                break
     return (a,b,c)
 
 
@@ -77,7 +73,7 @@ def calc_symmetricDiff(x):
 
     result = []
     #  take the set of each target list for the feature
-    targets = [set(i) for i in x.target_list.values] 
+    targets = [set(i) for i in x.Target.values] 
   
     for set_element in targets:
         result.append(len(set_element.difference(set.union(*[x for x in targets if x is not set_element]))))

@@ -111,12 +111,13 @@ class ShortStack():
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0_only = ftm_HD0_only
         self.ftm_only = ftm_only
-        self.mem_limit = psutil.virtual_memory().free - 10000
-        self.cpus = int(psutil.cpu_count()/2)-3
-        self.client = Client(name="ShortStack",memory_limit=self.mem_limit,
-                             n_workers=self.cpus, 
-                             threads_per_worker=self.cpus*2,
-                             processes=False)
+        self.mem_limit = psutil.virtual_memory().free - 1000
+        self.cpus = int(psutil.cpu_count())
+        self.client = Client(name="HexSembler",
+                             memory_limit=self.mem_limit,
+                             n_workers=self.cpus-2, 
+                             threads_per_worker=self.cpus/2,
+                             processes=True)
 
         # initialize file paths and output dirs
         self.encoding_file = os.path.abspath(encoding_table)
@@ -209,7 +210,7 @@ class ShortStack():
             log.error(error_message)
             raise SystemExit(error_msg)
     
-    @jit 
+    @jit(parallel=True) 
     def file_check(self, input_file):
         '''
         Purpose: check that input file paths exist and are not empty
@@ -234,8 +235,8 @@ class ShortStack():
         self.file_check(self.encoding_file)
         self.file_check(self.input_s6)
         self.file_check(self.target_fa)
-          
-                                       
+             
+                                          
         #########################
         ####   Parse Input   ####
         #########################
@@ -247,32 +248,34 @@ class ShortStack():
                                         self.encoding_file,
                                         self.cpus, 
                                         self.client)
-                                                 
+                                                    
         mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
-                          
+                             
         ########################
         ####   Encode S6    ####
         ########################
+        print("Encoding targets...\n")
         # instantiate encoder class from encoder.py
         encode = encoder.Encode_files(s6_df, 
                                       encoding_df, 
                                       self.output_dir,
                                       self.cpus, 
                                       self.client)
-                                             
+                                                
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                           
+                             
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-                                           
+                                              
         ###################################
         ####   Assemble Mutations    #####
         ###################################
         ## Supervised mode only ##
         # if mutations are provided, assemble mutation seqs from mutation_vcf
         if self.mutation_vcf != "none":
+            print("Assembling mutations...\n")
             self.log.info("Mutations assembled from:\n {}".format(self.mutation_vcf))
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
@@ -285,16 +288,22 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-            
+        
+        parity_df.to_parquet("./parity_df", engine='fastparquet')
+        s6_df.to_parquet("./s6_df", engine='fastparquet')       
         fasta_df.to_parquet("./fasta_df", engine='fastparquet')
         encoded_df.to_parquet("./encoded_df", engine='fastparquet')
         mutant_fasta.to_parquet("./mutant_fasta", engine='fastparquet')
+ 
+#         fasta_df = dd.read_parquet("./fasta_df")
+#         encoded_df = dd.read_parquet("./encoded_df")
+#         mutant_fasta = pd.DataFrame()
+#         mutant_fasta = dd.read_parquet("./mutant_fasta")
                                 
         ###############
         ###   FTM   ###
         ###############
-        align_message = "Running FTM...\n"
-        print(align_message)
+        print("Running FTM...\n")
                                   
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
@@ -311,7 +320,8 @@ class ShortStack():
                               )
         # run FTM
         all_counts, hamming_df, ftm_calls = run_ftm.main()
-                   
+        all_counts.to_parquet("./all_counts", engine="fastparquet")          
+        
         # cleanup 
         del encoded_df, mutant_fasta
         gc.collect()
@@ -320,8 +330,9 @@ class ShortStack():
         ###   valid off targets   ###
         #############################
         # save valid barcodes that are off target
-                           
-        @jit      
+        print("Saving off-target barcode information...\n")                   
+        
+        @jit(parallel=True)      
         def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
                              
             # get basecalls in s6 that are not in invalids
@@ -368,15 +379,12 @@ class ShortStack():
             ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
             raise SystemExit(ftm_message)
         else:
-            print("FTM complete. Sequencing results.")
+            print("FTM complete. Sequencing results...\n")
 
           
         ####################
         ###   Sequence   ###
         ####################
-           
-        # subset all calls for only ftm called features and regions
-           
         print("Sequencing...\n")        
         # instantiate sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,

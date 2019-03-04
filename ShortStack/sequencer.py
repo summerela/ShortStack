@@ -53,7 +53,7 @@ class Sequencer():
 
         return counts
     
-    @jit
+    @jit(parallel=True)
     def split_bases(self, count_df):
         '''
         purpose: split feature tuple rows into one per column with 
@@ -88,7 +88,7 @@ class Sequencer():
                                 var_name=var_name, value_name=value_name,
                                 col_level=col_level, token='melt')
     
-    @jit    
+    @jit(parallel=True)    
     def melt_edges(self, df):
         '''
         purpose: unravel rows with multipel columns of tuples
@@ -107,7 +107,7 @@ class Sequencer():
               
         return df
     
-    @jit
+    @jit(parallel=True)
     def split_tuples(self, df):
         '''
         purpose: split apart tuples and index to create final counts df for 
@@ -134,7 +134,7 @@ class Sequencer():
 
         return df
     
-    @jit
+    @jit(parallel=True)
     def calc_weights(self, df):
         '''
         purpose:sum the egde weights for each position
@@ -179,7 +179,7 @@ class Sequencer():
         
         return fasta_dd
     
-    @jit
+    @jit(parallel=True)
     def parse_refs(self, fasta_dd):
         '''
         purpose: pull apart the fasta_dd rows of tuples and parse into df
@@ -214,7 +214,7 @@ class Sequencer():
         
         return fasta_df
     
-    @jit
+    @jit(parallel=True)
     def add_refs(self, group, ref_df):
         '''
         purpose: add ref base info and keep position with base of N for areas
@@ -250,7 +250,7 @@ class Sequencer():
 
         return group_df
     
-    @jit
+    @jit(parallel=True)
     def get_max(self, group):
         
         # filter for nuc with max weight at each position
@@ -265,7 +265,7 @@ class Sequencer():
 
 
     
-    @jit     
+    @jit(parallel=True)     
     def main(self):
          
         # create list of position and base pair for each target

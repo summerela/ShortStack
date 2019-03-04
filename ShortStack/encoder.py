@@ -28,8 +28,9 @@ class Encode_files():
         self.cpus = cpus
         self.client = client
     
-    @jit        
+    @jit(parallel=True)        
     def map_basecalls(self, s6_df, encoding_df):
+        print("Mapping basecalls.")
         '''
         Purpose: Replace color codes from s6 file with targets from encoding.txt
         Input: 
@@ -62,8 +63,9 @@ class Encode_files():
          
         return encoded_df, parity_df
     
-    @jit
+    @jit(parallel=True)
     def remove_invalidBC(self, encoded_df):
+        print("Filtering out invalid barcodes.")
         '''
         purpose: remove barcodes that did not match a target and return dataframe
         input:
@@ -77,7 +79,8 @@ class Encode_files():
         assert len(encoded_df) != 0, "No valid barcodes found in encoding file."
 
         return encoded_df
-    @jit
+    
+    @jit(parallel=True)
     def main(self, s6_df, encoded_df):
         mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df)

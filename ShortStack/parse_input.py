@@ -19,7 +19,6 @@ import numpy as np
 pd.options.mode.chained_assignment = None
 
 
-
 # import logger
 log = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ class Parse_files():
         self.cpus = cpus
         self.client = client
     
-    @jit        
+    @jit(parallel=True)        
     def test_cols(self, input_df, df_name, required_cols):
         '''
         purpose: test that required columns are present in an input dataframe
@@ -55,8 +54,9 @@ class Parse_files():
             assert x in input_df.columns, error_message
  
        
-    @jit                       
+    @jit(parallel=True)                       
     def parse_mutations(self):
+        print("Parsing mutations.")
         '''
         purpose: parse input mutation vcf file
         input: vcf file or gz vcf file, one alternate per line
@@ -102,8 +102,9 @@ class Parse_files():
         
         return mutation_df
     
-    @jit    
+    @jit(parallel=True)    
     def parse_encoding(self):
+        print("Parsing encoding file.")
         '''
         purpose: parse barcode encoding file
         input: either user specified or default barcode encoding file
@@ -129,7 +130,7 @@ class Parse_files():
         
         return encoding
     
-    @jit
+    @jit(parallel=True)
     def split_fasta(self):
         '''
         purpose: split out fasta headers and sequences
@@ -143,6 +144,7 @@ class Parse_files():
         return info_list, seq_list
 
     def parse_fasta(self):
+        print("Parsing FASTA file.")
         '''
         purpose: parse input fasta files containing target sequences 
         input: fasta file in standard fasta format
@@ -181,9 +183,9 @@ class Parse_files():
 
         return fasta_df
 
-    @jit
+    @jit(parallel=True)
     def read_s6(self, input_s6):
-        
+        print("Reading in S6 file.")
         # specify S6 datatypes
         dtypes = {'Features':'object',
           'fov': 'object',
@@ -215,8 +217,9 @@ class Parse_files():
                                     col_level=col_level, token='melt')
         
 
-    @jit
+    @jit(parallel=True)
     def pivot_s6(self, input_s6):
+        print("Parsing S6 file.")
         
         # expand basecalls to one row per feature
         s6_df = self.melt(input_s6, 
@@ -244,7 +247,7 @@ class Parse_files():
         # write out to parquet
         outfile = os.path.join(self.output_dir, 'all3spotters')
         s6_df.to_parquet(outfile, engine='fastparquet')  
-        
+
         return s6_df
 
     def main_parser(self):
