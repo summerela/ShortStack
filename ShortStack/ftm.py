@@ -65,7 +65,6 @@ class FTM():
     
     @jit(parallel=True)
     def create_ngrams(self, row):
-        print("Creating reference ngrams.")
         '''
         purpose: breaks apart reference sequence into self.kmer_length kmers
         input: fasta_df, mutation_df if provided
@@ -205,7 +204,9 @@ class FTM():
         
         # save raw hamming counts to file and remove from memory
         outfile = os.path.join(self.output_dir, "rawCounts")
-        hamming_df.to_parquet(outfile, engine='fastparquet')
+        hamming_df.to_parquet(outfile, 
+                              engine='fastparquet',
+                              append=False)
         
         return hamming_df
     
@@ -432,7 +433,7 @@ class FTM():
     
     @jit(parallel=True)   
     def decision_tree(self, x, bc_counts2):
-        print("Selecting best weighted match.")
+
         '''
         purpose: check coverage. If one has more than 3x coverage, keep. 
             Else check feature diversity scores, if one score is 2x or greater, keep
@@ -517,7 +518,9 @@ class FTM():
            
             # save no_call info to file
             no_ftm_file = os.path.join(self.output_dir, "no_ftm_calls")
-            no_calls.to_parquet(no_ftm_file,engine='fastparquet')
+            no_calls.to_parquet(no_ftm_file,
+                                append=False,
+                                engine='fastparquet')
            
         # pull out only calls related to FTM called region for HD under threshold   
         all_calls = calls[calls._merge != "left_only"].drop(["counts", "id",
@@ -537,7 +540,9 @@ class FTM():
         all_calls = self.barcode_counts(all_norm)
         
         counts_file = os.path.join(self.output_dir, "all_counts") 
-        all_calls.to_parquet(counts_file, engine='fastparquet')
+        all_calls.to_parquet(counts_file, 
+                             append=False,
+                             engine='fastparquet')
 
         return all_calls
     
@@ -582,7 +587,9 @@ class FTM():
         # save basecall normalized counts to file
         # save raw hamming counts to file and remove from memory
         bc_out = os.path.join(self.output_dir, "bc_counts")  
-        bc_counts.to_parquet(bc_out, engine='fastparquet')
+        bc_counts.to_parquet(bc_out, 
+                             append=False,
+                             engine='fastparquet')
         bc_counts2 = bc_counts.drop(['pool', 'cycle', 'BC'],axis=1)  
            
         # sum counts for each region
@@ -605,8 +612,9 @@ class FTM():
         assert len(ftm_counts) > 0, "No FTM results."
     
          # output ftm to file
-        ftm_file = os.path.join(self.output_dir, "ftm_calls.tsv")
+        ftm_file = os.path.join(self.output_dir, "ftm_calls")
         ftm_counts.to_parquet(ftm_file, 
+                              append=False,
                               engine='fastparquet')
 
         # save no_calls to a file and add HD1+ back in for sequencing

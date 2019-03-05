@@ -59,7 +59,9 @@ class Encode_files():
         parity_df = encoded_df[encoded_df['Target'].isnull()]
         parity_df = parity_df.drop(["Target", "bc_length"], axis=1)
             
-        parity_df.to_parquet(self.invalids_file, engine='fastparquet')
+        parity_df.to_parquet(self.invalids_file, 
+                             append=False,
+                             engine='fastparquet')
          
         return encoded_df, parity_df
     

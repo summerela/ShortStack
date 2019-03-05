@@ -246,7 +246,9 @@ class Parse_files():
         
         # write out to parquet
         outfile = os.path.join(self.output_dir, 'all3spotters')
-        s6_df.to_parquet(outfile, engine='fastparquet')  
+        s6_df.to_parquet(outfile, 
+                         append=False,
+                         engine='fastparquet')  
 
         return s6_df
 

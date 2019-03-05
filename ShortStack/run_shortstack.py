@@ -127,7 +127,7 @@ class ShortStack():
 
         # create output dir if not exists
         self.create_outdir(self.output_dir)
-
+        raise SystemExit(self.output_dir)
         # gather input file locations
         self.input_s6 = os.path.abspath(input_s6)
         self.target_fa = os.path.abspath(target_fa)
@@ -289,11 +289,11 @@ class ShortStack():
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
         
-        parity_df.to_parquet("./parity_df", engine='fastparquet')
-        s6_df.to_parquet("./s6_df", engine='fastparquet')       
-        fasta_df.to_parquet("./fasta_df", engine='fastparquet')
-        encoded_df.to_parquet("./encoded_df", engine='fastparquet')
-        mutant_fasta.to_parquet("./mutant_fasta", engine='fastparquet')
+        parity_df.to_parquet("./parity_df", append=False, engine='fastparquet')
+        s6_df.to_parquet("./s6_df", append=False, engine='fastparquet')       
+        fasta_df.to_parquet("./fasta_df", append=False, engine='fastparquet')
+        encoded_df.to_parquet("./encoded_df", append=False, engine='fastparquet')
+        mutant_fasta.to_parquet("./mutant_fasta", append=False, engine='fastparquet')
  
 #         fasta_df = dd.read_parquet("./fasta_df")
 #         encoded_df = dd.read_parquet("./encoded_df")
@@ -320,7 +320,9 @@ class ShortStack():
                               )
         # run FTM
         all_counts, hamming_df, ftm_calls = run_ftm.main()
-        all_counts.to_parquet("./all_counts", engine="fastparquet")          
+        all_counts.to_parquet("./all_counts", 
+                              append=False,
+                              engine="fastparquet")          
         
         # cleanup 
         del encoded_df, mutant_fasta
