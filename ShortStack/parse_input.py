@@ -26,7 +26,6 @@ class Parse_files():
     
     # instance parameters
     def __init__(self, 
-                 input_s6,
                  output_dir, 
                  target_fa, 
                  mutation_file, 
@@ -34,7 +33,6 @@ class Parse_files():
                  cpus,
                  client):
         
-        self.input_s6 = input_s6
         self.output_dir = output_dir
         self.target_fa = target_fa
         self.mutation_file = mutation_file
@@ -183,74 +181,74 @@ class Parse_files():
 
         return fasta_df
 
-    @jit(parallel=True)
-    def read_s6(self, input_s6):
-        print("Reading in S6 file.")
-        # specify S6 datatypes
-        dtypes = {'Features':'object',
-          'fov': 'object',
-          'x': 'object',
-          'y': 'object'}
-        
-        # read in S6 file and create feature id's
-        df = dd.read_csv(input_s6, dtype=dtypes, blocksize='500MB')
-        
-        # Remove cheeky comma column, if it exists
-        df = df.loc[:,~df.columns.str.contains('^Unnamed')]
-        # Remove whitespace from column headers
-        df.columns = df.columns.str.strip()
-        
-        df["FeatureID"] = df["fov"].astype(str) + "_" + df["x"].astype(str) + "_" + df["y"].astype(str)
-        df= df.drop(["Features", "fov", "x", "y"], axis=1)
-        
-        return df
-    
-
-    def melt(self, frame, id_vars=None, value_vars=None, var_name=None,
-         value_name='value', col_level=None):
-
-        from dask.dataframe.core import no_default
-    
-        return frame.map_partitions(pd.melt, meta=no_default, id_vars=id_vars,
-                                    value_vars=value_vars,
-                                    var_name=var_name, value_name=value_name,
-                                    col_level=col_level, token='melt')
-        
-
-    @jit(parallel=True)
-    def pivot_s6(self, input_s6):
-        print("Parsing S6 file.")
-        
-        # expand basecalls to one row per feature
-        s6_df = self.melt(input_s6, 
-                          id_vars="FeatureID",
-                          value_name='BC')
-        
-        s6_df['BC'] = s6_df['BC'].astype('int')
-        
-        # filter out invalid reads
-        s6_df = s6_df[s6_df.BC != 0]
-        s6_df = s6_df[s6_df.BC > 111111]
-        
-        s6_df['BC'] = s6_df['BC'].astype('str')
-        
-        # filter out rows where basecall contains uncalled bases of 0 
-        s6_df = s6_df[~s6_df.BC.str.contains("0")]
-
-        # split up pool and cycle info
-        s6_df["cycle"] = s6_df['variable'].str.partition('P')[0]
-        s6_df["pool"] = s6_df['variable'].str.partition('P')[2]
-        
-        # drop variable column
-        s6_df = s6_df.drop("variable", axis=1)
-        
-        # write out to parquet
-        outfile = os.path.join(self.output_dir, 'all3spotters')
-        s6_df.to_parquet(outfile, 
-                         append=False,
-                         engine='fastparquet')  
-
-        return s6_df
+#     @jit(parallel=True)
+#     def read_s6(self, input_s6):
+#         print("Reading in S6 file.")
+#         # specify S6 datatypes
+#         dtypes = {'Features':'object',
+#           'fov': 'object',
+#           'x': 'object',
+#           'y': 'object'}
+#         
+#         # read in S6 file and create feature id's
+#         df = dd.read_csv(input_s6, dtype=dtypes, blocksize='500MB')
+#         
+#         # Remove cheeky comma column, if it exists
+#         df = df.loc[:,~df.columns.str.contains('^Unnamed')]
+#         # Remove whitespace from column headers
+#         df.columns = df.columns.str.strip()
+#         
+#         df["FeatureID"] = df["fov"].astype(str) + "_" + df["x"].astype(str) + "_" + df["y"].astype(str)
+#         df= df.drop(["Features", "fov", "x", "y"], axis=1)
+#         
+#         return df
+#     
+# 
+#     def melt(self, frame, id_vars=None, value_vars=None, var_name=None,
+#          value_name='value', col_level=None):
+# 
+#         from dask.dataframe.core import no_default
+#     
+#         return frame.map_partitions(pd.melt, meta=no_default, id_vars=id_vars,
+#                                     value_vars=value_vars,
+#                                     var_name=var_name, value_name=value_name,
+#                                     col_level=col_level, token='melt')
+#         
+# 
+#     @jit(parallel=True)
+#     def pivot_s6(self, input_s6):
+#         print("Parsing S6 file.")
+#         
+#         # expand basecalls to one row per feature
+#         s6_df = self.melt(input_s6, 
+#                           id_vars="FeatureID",
+#                           value_name='BC')
+#         
+#         s6_df['BC'] = s6_df['BC'].astype('int')
+#         
+#         # filter out invalid reads
+#         s6_df = s6_df[s6_df.BC != 0]
+#         s6_df = s6_df[s6_df.BC > 111111]
+#         
+#         s6_df['BC'] = s6_df['BC'].astype('str')
+#         
+#         # filter out rows where basecall contains uncalled bases of 0 
+#         s6_df = s6_df[~s6_df.BC.str.contains("0")]
+# 
+#         # split up pool and cycle info
+#         s6_df["cycle"] = s6_df['variable'].str.partition('P')[0]
+#         s6_df["pool"] = s6_df['variable'].str.partition('P')[2]
+#         
+#         # drop variable column
+#         s6_df = s6_df.drop("variable", axis=1)
+#         
+#         # write out to parquet
+#         outfile = os.path.join(self.output_dir, 'all3spotters')
+#         s6_df.to_parquet(outfile, 
+#                          append=False,
+#                          engine='fastparquet')  
+# 
+#         return s6_df
 
     def main_parser(self):
         
@@ -268,11 +266,11 @@ class Parse_files():
             # parse input fasta file
             fasta_df = self.parse_fasta()
             
-            # read in and parse S6
-            s6_rows = self.read_s6(self.input_s6)
-            s6_df = self.pivot_s6(s6_rows)
+#             # read in and parse S6
+#             s6_rows = self.read_s6(self.input_s6)
+#             s6_df = self.pivot_s6(s6_rows)
       
-            return mutation_df, s6_df, fasta_df, encoding_df
+            return mutation_df, fasta_df, encoding_df
         except Exception as e:
             log.error(e)
             raise SystemExit(e)
