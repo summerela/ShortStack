@@ -52,7 +52,7 @@ import logging, logging.config     # required for seqlog formatting
 import sys, os, time, psutil, gc, dask, glob
 import warnings
 if not sys.warnoptions:
-    warnings.simplefilter("ignore") # ignore dask connection warnings until I find a way to resolve tcp issues
+    warnings.simplefilter("ignore") # ignore dask connection warnings 
 from logging.handlers import RotatingFileHandler    # set max log size before rollover
 from logging.handlers import TimedRotatingFileHandler    # set time limit of 31 days on log files
 import configparser as cp   # parse config files 
@@ -129,7 +129,7 @@ class ShortStack():
         self.create_outdir(self.output_dir)
         
         # gather input file locations
-        self.input_s6 = input_s6
+        self.input_s6 = os.path.abspath(input_s6)
         self.target_fa = os.path.abspath(target_fa)
         self.mutation_vcf = mutation_vcf
         
@@ -250,8 +250,10 @@ class ShortStack():
         mutation_df, fasta_df, encoding_df = parse.main_parser()
         
         # read in s6 parquet
-        glob_path = '{}/*/*.parquet'.format(self.input_s6)
+        glob_path = '{}/*.parquet'.format(self.input_s6)
         files = glob.glob(glob_path)
+        if len(files) < 1:
+            raise SystemExit("Check path to parquet S6 directory.")
         s6_df = dd.read_parquet(files)
                    
         ########################
