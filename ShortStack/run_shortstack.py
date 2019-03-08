@@ -127,9 +127,9 @@ class ShortStack():
 
         # create output dir if not exists
         self.create_outdir(self.output_dir)
-        raise SystemExit(self.output_dir)
+        
         # gather input file locations
-        self.input_s6 = os.path.abspath(input_s6)
+        self.input_s6 = input_s6
         self.target_fa = os.path.abspath(target_fa)
         self.mutation_vcf = mutation_vcf
         
@@ -233,7 +233,6 @@ class ShortStack():
         print("Parsing input...\n")
         # check that file paths are valid
         self.file_check(self.encoding_file)
-        self.file_check(self.input_s6)
         self.file_check(self.target_fa)
              
                                           
@@ -241,16 +240,20 @@ class ShortStack():
         ####   Parse Input   ####
         #########################
         # instantiate parsing class from parse_input.py 
-        parse = parse_input.Parse_files(self.input_s6,
-                                        self.output_dir,
+        parse = parse_input.Parse_files(self.output_dir,
                                         self.target_fa,
                                         self.mutation_vcf, 
                                         self.encoding_file,
                                         self.cpus, 
                                         self.client)
                                                     
-        mutation_df, s6_df, fasta_df, encoding_df = parse.main_parser()
-                             
+        mutation_df, fasta_df, encoding_df = parse.main_parser()
+        
+        # read in s6 parquet
+        glob_path = '{}/*/*.parquet'.format(self.input_s6)
+        files = glob.glob(glob_path)
+        s6_df = dd.read_parquet(files)
+                   
         ########################
         ####   Encode S6    ####
         ########################
@@ -288,17 +291,6 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-        
-        parity_df.to_parquet("./parity_df", append=False, engine='fastparquet')
-        s6_df.to_parquet("./s6_df", append=False, engine='fastparquet')       
-        fasta_df.to_parquet("./fasta_df", append=False, engine='fastparquet')
-        encoded_df.to_parquet("./encoded_df", append=False, engine='fastparquet')
-        mutant_fasta.to_parquet("./mutant_fasta", append=False, engine='fastparquet')
- 
-#         fasta_df = dd.read_parquet("./fasta_df")
-#         encoded_df = dd.read_parquet("./encoded_df")
-#         mutant_fasta = pd.DataFrame()
-#         mutant_fasta = dd.read_parquet("./mutant_fasta")
                                 
         ###############
         ###   FTM   ###
