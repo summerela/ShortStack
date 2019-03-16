@@ -6,9 +6,11 @@ ftm.py
 - returns FTM calls
 '''
 
-import sys, os, logging, dask, psutil, gc
+import sys, os, logging, dask, psutil, gc, shutil
 import warnings
 from IPython.utils.sysinfo import num_cpus
+from _operator import mul
+from numba.tests.compile_with_pycc import mult
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 from numpy import single
@@ -204,6 +206,8 @@ class FTM():
         
         # save raw hamming counts to file and remove from memory
         outfile = os.path.join(self.output_dir, "rawCounts")
+        if os.path.exists(outfile):
+            shutil.rmtree(outfile, ignore_errors=True)
         hamming_df.to_parquet(outfile, 
                               engine='fastparquet',
                               append=False)
@@ -352,33 +356,10 @@ class FTM():
         output: hamming_df= calls within hamming threshold
             perfect matches with columns denoting max and second max counts
         '''
-
-        tops = dd.from_pandas(regional_counts.groupby('FeatureID')["counts"]\
-            .apply(lambda x: x.nlargest(2)).compute(n_workers=self.cpus*2, 
-                             threads_per_worker=self.cpus,
-                             processes=True).reset_index(), npartitions=self.cpus)        
-        tops = tops.drop("level_1", axis=1)
-        tops.columns = ["FeatureID", "max2"]
-
-        return tops
-
-    
-    @jit(parallel=True)
-    def find_tops(self, tops, regional_counts):
-        print("Filtering for top matches.")
-        '''
-        purpose: retain only top two targets with highest counts
-        input: perfects of perfect matches
-        output: perfects subset to top two matches 
-        '''
         
-        top2 = dd.merge(tops, regional_counts, 
-                         on="FeatureID",
-                         how='left',
-                         npartitions=self.cpus).drop_duplicates()
-        
-        # return all rows that match the max,2nd gene_count scores
-        top2 = top2[top2.max2 == top2.counts]
+        top2 = regional_counts.groupby('FeatureID')[['FeatureID', 'region', 'feature_div', 'counts']]\
+            .apply(lambda x: x.nlargest(2, columns=['counts'])).reset_index(drop=True)
+        top2.index.name = ''                
 
         return top2
                 
@@ -393,7 +374,7 @@ class FTM():
         
         # get group size for each feature
         a = tops.groupby(["FeatureID"]).count().reset_index()
-        a = a[["FeatureID", "max2"]]
+        a = a[["FeatureID", "counts"]]
         a.columns = ["FeatureID", "grp_size"]
         a = a.drop_duplicates()
         
@@ -407,8 +388,8 @@ class FTM():
         multis = tops[tops.grp_size > 1]
 
         # get rid of grp_size column
-        singles = singles.drop(["grp_size", "max2"], axis=1)
-        multis = multis.drop(["max2", "grp_size"], axis=1)
+        singles = singles.drop(["grp_size"], axis=1)
+        multis = multis.drop(["grp_size"], axis=1)
     
         return singles, multis
     
@@ -443,8 +424,8 @@ class FTM():
         output: used in return_ftm to return ties that pass this filtering logic
         '''
         
-        # calc comparison values
-        second_max = x.counts
+        # find second highest count
+        second_max = x.counts.min()
         
         # check if result with max count >= 3x second count
         result = x[x.counts > (3 * second_max)]
@@ -454,33 +435,42 @@ class FTM():
             return result
         # otherwise check feature div
         else:
-            second_div = x.feature_div.nlargest(2).min()
-            result = x[x.feature_div >= (2 * second_div)]
-                
+            second_div = x.feature_div.min()
+            result = x[x.feature_div > (2 * second_div)]
+             
             # if there is only one result now, return it
             if len(result) == 1:
                 return result
+                  
+            # otherwise check symmetrical difference
             else:
-                pass
-                 
-#             # otherwise check symmetrical difference
-#             else:
-#                  
-#                 group = self.calc_symDiff(x)
-#                   
-#                 # take top sym_diff score for group
-#                 max_symDiff = group.sym_diff.max()
-#                     
-#                 result = group[group.sym_diff == max_symDiff]
-#                  
-#                 if len(result) == 1:
-#                     
-#                     result = result.drop(["sym_diff", "Target"], axis=1)
-#                     result = x.merge(result,
-#                                 on=["FeatureID", "region"])
-#                  
-#                 else:
-#                     pass
+                
+                # pull out targets for each region
+                group = dd.merge(x, bc_counts2,
+                                 on=["FeatureID", "region"],
+                                 how='left').drop_duplicates()
+                group = self.client.compute(group)
+                group = self.client.gather(group)
+                
+                # create a list of targest for each region
+                target_df = group.groupby(["FeatureID", "region"])["Target"].apply(set).reset_index()
+                
+                # calculate Targets unique to each region of interest
+                target_df["sym_diff"] = cpy.calc_symmetricDiff(target_df)
+
+                target_df = target_df.reset_index(drop=True)
+
+                # take top sym_diff score for group
+                max_symDiff = target_df.sym_diff.max()    
+                result = target_df[target_df.sym_diff == max_symDiff]
+                
+                if len(result) == 1:
+                     
+                    result = result.drop(["sym_diff", "Target"], axis=1)
+                    result = x.merge(result,
+                                on=["FeatureID", "region"])
+                else:
+                    pass
     
     @jit(parallel=True)
     def process_multis(self, multi_df, bc_counts2):
@@ -490,8 +480,7 @@ class FTM():
         multi_df = self.client.gather(multis)
         
         multi_df = multi_df.groupby("FeatureID").apply(self.decision_tree,
-                                        bc_counts2).reset_index(drop=True)
-        
+            bc_counts2[["FeatureID", "Target", "region"]]).reset_index(drop=True)
         return multi_df
     
     @jit(parallel=True)
@@ -506,40 +495,47 @@ class FTM():
             perfect_calls = bc_counts of per feature/target counts for ftm called features
         '''
         
-        ftm_df = ftm_df.drop("region", axis=1)
-        calls = dd.merge(hamming_df, ftm_df, on=['FeatureID'], 
+        # store information on no calls 
+        calls = dd.merge(hamming_df, ftm_df, on=['FeatureID', 'region'], 
                    how='left', indicator=True)
-        no_calls = calls[calls._merge == "left_only"].drop(["counts", 
-                                                            "feature_div",
-                                                            "_merge"],
-                                                            axis=1)
-                  
-        if len(no_calls) > 0:
-           
-            # save no_call info to file
-            no_ftm_file = os.path.join(self.output_dir, "no_ftm_calls")
-            no_calls.to_parquet(no_ftm_file,
-                                append=False,
-                                engine='fastparquet')
-           
+        
         # pull out only calls related to FTM called region for HD under threshold   
         all_calls = calls[calls._merge != "left_only"].drop(["counts", "id",
                                                                   "feature_div",
                                                                   "_merge"],
                                                                  axis=1).drop_duplicates()
+                                                                 
+        no_calls = calls[calls._merge == "left_only"].drop(["counts", 
+                                                            "feature_div",
+                                                            "_merge"],
+                                                            axis=1).drop_duplicates()
+                  
+        if len(no_calls) > 0:
+           
+            # save no_call info to file
+            no_ftm_file = os.path.join(self.output_dir, "no_ftm_calls")
+            if os.path.exists(no_ftm_file):
+                shutil.rmtree(no_ftm_file, ignore_errors=True)
+            no_calls.to_parquet(no_ftm_file,
+                                append=False,
+                                engine='fastparquet')
+           
+        
 
         return all_calls
     
     @jit(parallel=True)
     def filter_allCalls(self, all_calls):
-        print("Add in HD1+.")   
+        print("Adding in HD1+.")   
         # normalize multi-mapped reads and count
         all_norm = self.locate_multiMapped(all_calls)
-           
+          
         # group counts together for each bar code
         all_calls = self.barcode_counts(all_norm)
         
         counts_file = os.path.join(self.output_dir, "all_counts") 
+        if os.path.exists(counts_file):
+            shutil.rmtree(counts_file, ignore_errors=True)
         all_calls.to_parquet(counts_file, 
                              append=False,
                              engine='fastparquet')
@@ -548,7 +544,6 @@ class FTM():
     
     def main(self):
         
-        print("ngrams") 
         # create fasta dataframe and combine with mutations if provided
         fasta_df = self.create_fastaDF(self.fasta_df, self.mutant_fasta)
                     
@@ -586,7 +581,9 @@ class FTM():
               
         # save basecall normalized counts to file
         # save raw hamming counts to file and remove from memory
-        bc_out = os.path.join(self.output_dir, "bc_counts")  
+        bc_out = os.path.join(self.output_dir, "bc_counts") 
+        if os.path.exists(bc_out):
+            shutil.rmtree(bc_out, ignore_errors=True) 
         bc_counts.to_parquet(bc_out, 
                              append=False,
                              engine='fastparquet')
@@ -596,23 +593,31 @@ class FTM():
         region_counts = self.regional_counts(bc_counts)
       
         # find top 2 scores for each bar code
-        maxes = self.get_top2(region_counts)    
-
-        # pull out top 2 best options
-        top2 = self.find_tops(maxes, region_counts)
-
-        print('finding multis')        
+        top2 = self.get_top2(region_counts)    
+      
         singles, multis = self.find_multis(top2)
         
-        print('processing multis')
         multi_df = self.process_multis(multis, bc_counts2)
         
-        # concat results with singles
-        ftm_counts = dd.concat([singles, multi_df])    
-        assert len(ftm_counts) > 0, "No FTM results."
-    
-         # output ftm to file
-        ftm_file = os.path.join(self.output_dir, "ftm_calls")
+        # concat results for df's with results
+        single_length = len(singles)
+        multi_length = len(multi_df)
+        if (single_length > 0) and (multi_length > 0):
+            ftm_counts = dd.concat([singles, multi_df])
+        elif single_length > 0:
+            ftm_counts = singles
+        elif multi_length > 0:
+            ftm_counts = multi_df
+        else:
+            "No FTM calls can be made on this dataset."
+        ftm_counts = dd.from_pandas(ftm_counts,
+                                    npartitions=self.cpus)
+        
+        # output ftm to file
+        ftm_file = os.path.join(self.output_dir, "ftm_calls/")
+        # remove any existing directories
+        if os.path.exists(ftm_file):
+            shutil.rmtree(ftm_file, ignore_errors=True)
         ftm_counts.to_parquet(ftm_file, 
                               append=False,
                               engine='fastparquet')

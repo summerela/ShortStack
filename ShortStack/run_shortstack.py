@@ -49,7 +49,7 @@ python run_shortstack.py -c path/to/config.txt
 '''
 #### import packages required to load modules ####
 import logging, logging.config     # required for seqlog formatting
-import sys, os, time, psutil, gc, dask, glob
+import sys, os, time, psutil, gc, dask, glob, shutil
 import warnings
 if not sys.warnoptions:
     warnings.simplefilter("ignore") # ignore dask connection warnings 
@@ -314,7 +314,10 @@ class ShortStack():
                               )
         # run FTM
         all_counts, hamming_df, ftm_calls = run_ftm.main()
-        all_counts.to_parquet("./all_counts", 
+        all_counts_dir = os.path.join(self.output_dir, "all_counts")
+        if os.path.exists(all_counts_dir):
+            shutil.rmtree(all_counts_dir, ignore_errors=True)
+        all_counts.to_parquet(all_counts_dir, 
                               append=False,
                               engine="fastparquet")          
         
@@ -325,46 +328,56 @@ class ShortStack():
         #############################
         ###   valid off targets   ###
         #############################
-        # save valid barcodes that are off target
-        print("Saving off-target barcode information...\n")                   
-        
-        @jit(parallel=True)      
-        def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
-                             
-            # get basecalls in s6 that are not in invalids
-            no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), on=['FeatureID','BC', 'pool', 'cycle'], 
-                       how='left', indicator=True)
-                                        
-            # pull out feature id's/basecalls that are only in s6_df and not in invalids
-            no_invalids = no_invalids[no_invalids._merge == "left_only"]
-            no_invalids = no_invalids.drop(["_merge", "Target"], axis=1)
-                                                 
-            # prep hamming_df for merge
-            hamming_df = dd.from_pandas(hamming_df[["FeatureID", "BC", "cycle", "pool"]], npartitions=self.cpus)
-            hamming_df = hamming_df.drop_duplicates()
-                                         
-            # pull out featureID/BC that are only in no_invalids and not in hamming=not hitting targets
-            valid_offTargets = dd.merge(no_invalids, hamming_df, on=['FeatureID','BC', 'pool', 'cycle'], 
-                       how='left', indicator=True) 
-            valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
-            valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-                              
-            # pull out features with ftm votes
-            final_offTargets = valid_offTargets[~valid_offTargets.FeatureID.isin(ftm_calls.FeatureID)]
-                   
-            # compute data frame                      
-            final_offTargets = self.client.compute(final_offTargets)
-            final_offTargets = self.client.gather(final_offTargets)
-                   
-            # sort output
-            final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
-                                                                "cycle", "BC"])
-                                                
-            # save to file
-            valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
-            final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-                                     
-        save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
+#         # save valid barcodes that are off target
+#         print("Saving off-target barcode information...\n")                   
+#         
+#         @jit(parallel=True)      
+#         def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
+#                              
+#             # filter s6 for valid 3spotters not found in encoding file
+#             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), 
+#                                 on=['FeatureID','BC', 'pool', 'cycle'], 
+#                                 how='left', indicator=True)
+#                                         
+#             # pull out feature id's/basecalls that are only in s6_df and not in invalids
+#             no_invalids = no_invalids[no_invalids._merge == "left_only"]
+#             no_invalids = no_invalids.drop(["_merge", "idx"], axis=1)
+# 
+#                                                 
+#             # prep hamming_df for merge
+#             hamming_df = hamming_df[["FeatureID", "BC", "cycle", "pool"]]
+#             hamming_df = hamming_df.drop_duplicates().reset_index(drop=True) 
+#                                    
+#             # pull out featureID/BC that are in s6 but not in hamming=not hitting targets
+#             valid_offTargets = dd.merge(no_invalids, hamming_df,  
+#                        how='left', indicator=True)  
+#             
+#             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
+#             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
+#             
+#                            
+#             # pull out features with ftm votes
+#             final_offTargets = dd.merge(valid_offTargets, 
+#                                         ftm_calls[["FeatureID"]],
+#                                         on=["FeatureID"],
+#                                         how='left',
+#                                         indicator=True)
+#             final_offTargets = final_offTargets[final_offTargets._merge == "left_only"]
+#             final_offTargets = final_offTargets.drop(["_merge"], axis=1)
+#             raise SystemExit(final_offTargets.head())      
+#             # compute data frame                      
+#             final_offTargets = self.client.compute(final_offTargets)
+#             final_offTargets = self.client.gather(final_offTargets)
+#                    
+#             # sort output
+#             final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
+#                                                                 "cycle", "BC"])
+#                                                 
+#             # save to file
+#             valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
+#             final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
+#                                      
+#         save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
                                      
         # clean up
         del parity_df, s6_df, hamming_df
@@ -410,7 +423,6 @@ class ShortStack():
         self.client.close()
         
         # cleanup temp files and directories
-        import shutil
         dask_folder = os.path.join(os.path.curdir, "dask-worker-space")
         shutil.rmtree(dask_folder)
         

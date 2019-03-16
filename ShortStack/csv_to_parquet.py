@@ -22,6 +22,9 @@ import dask.dataframe as dd
 import sys, os
 from numba import jit
 import pandas as pd
+import warnings
+if not sys.warnoptions:
+    warnings.simplefilter("ignore") # ignore dask warnings 
 
 # read file in parallel using Dask
 @jit(parallel=True)

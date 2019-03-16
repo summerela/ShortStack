@@ -39,7 +39,7 @@ class Encode_files():
         Output: s6_df with target seqs instead of color codes
         '''
         
-        # dask decided not to join well on index, which is stupid
+        # create join id column
         s6_df["idx"] = s6_df.BC.astype(str) + ":" + s6_df.pool.astype(str)
         encoding_df["idx"] = encoding_df.BC.astype(str) + ":" + encoding_df.PoolID.astype(str)
         

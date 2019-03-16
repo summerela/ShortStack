@@ -5,7 +5,7 @@
 
 [user_facing_options]
 output_dir = ./
-input_s6=./example_files/krasNras_S6.csv
+input_s6=./example_files/s6_parquet/
 target_fa=./example_files/kras_nras.fa
 encoding_table=./example_files/encoding.txt
 mutation_vcf=./example_files/kras_nras_mutant.vcf
