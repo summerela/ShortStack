@@ -9,8 +9,6 @@ ftm.py
 import sys, os, logging, dask, psutil, gc, shutil
 import warnings
 from IPython.utils.sysinfo import num_cpus
-from _operator import mul
-from numba.tests.compile_with_pycc import mult
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 from numpy import single
@@ -609,7 +607,7 @@ class FTM():
         elif multi_length > 0:
             ftm_counts = multi_df
         else:
-            "No FTM calls can be made on this dataset."
+            raise SystemExit("No FTM calls can be made on this dataset.")
         ftm_counts = dd.from_pandas(ftm_counts,
                                     npartitions=self.cpus)
         
