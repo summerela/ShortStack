@@ -106,7 +106,8 @@ class FTM():
         # break apart dataframe into one row per tuple
         final_dd = self.client.compute(dd.from_pandas(ngram_df.apply(lambda x: \
                 pd.Series(x[0]),axis=1).stack().reset_index(level=1, drop=True),
-                npartitions=self.cpus))
+                npartitions=self.cpus,
+                sort=False))
         
         final_df =  pd.DataFrame(self.client.gather(final_dd))                                                          
         final_df.columns = ["tups"]
@@ -173,7 +174,9 @@ class FTM():
         
         # create dataframe from list of matches
         hamming_df = pd.DataFrame(hamming_list, columns=["ref_match", "bc_feature", "hamming"])
-        hamming_df = dd.from_pandas(hamming_df, npartitions=self.cpus)
+        hamming_df = dd.from_pandas(hamming_df, 
+                                    sort=False,
+                                    npartitions=self.cpus)
         hamming_df = hamming_df.drop_duplicates()
         hamming_df = hamming_df.set_index("ref_match")
         hamming_df = self.client.persist(hamming_df)
@@ -377,10 +380,10 @@ class FTM():
         a = a.drop_duplicates()
         
         # add counts back to tops df
-        tops = tops.merge(a, on=["FeatureID"],
+        tops = dd.merge(tops, a, on=["FeatureID"],
                           how='left',
                           npartitions=self.cpus)
-
+        
         # separate ties to process
         singles = tops[tops.grp_size == 1]
         multis = tops[tops.grp_size > 1]
@@ -498,11 +501,13 @@ class FTM():
                    how='left', indicator=True)
         
         # pull out only calls related to FTM called region for HD under threshold   
-        all_calls = calls[calls._merge != "left_only"].drop(["counts", "id",
+        all_calls = calls[calls._merge == "both"].drop(["counts", "id",
                                                                   "feature_div",
                                                                   "_merge"],
                                                                  axis=1).drop_duplicates()
-                                                                 
+        if len(all_calls) == 0:
+            raise SystemExit("No FTM calls were made.")     
+                                                            
         no_calls = calls[calls._merge == "left_only"].drop(["counts", 
                                                             "feature_div",
                                                             "_merge"],
@@ -540,6 +545,7 @@ class FTM():
 
         return all_calls
     
+    @jit(parallel=True)
     def main(self):
         
         # create fasta dataframe and combine with mutations if provided
@@ -553,9 +559,8 @@ class FTM():
         ngram_df = self.parse_ngrams(fasta_df)
                    
         # split ngrams and match with position
-        ngram_df = pd.DataFrame(ngram_df.apply(lambda x: self.split_ngrams(x), 
-                                               axis=1))
-                    
+        ngram_df = pd.DataFrame(ngram_df.apply(self.split_ngrams, 
+                                               axis=1))           
         # parse the final ngram df
         ngrams = self.final_ngrams(ngram_df)
        
@@ -604,12 +609,16 @@ class FTM():
             ftm_counts = dd.concat([singles, multi_df])
         elif single_length > 0:
             ftm_counts = singles
+            ftm_counts = dd.from_pandas(ftm_counts,
+                                    sort=False,
+                                    npartitions=self.cpus)
         elif multi_length > 0:
             ftm_counts = multi_df
+            ftm_counts = dd.from_pandas(ftm_counts,
+                                    sort=False,
+                                    npartitions=self.cpus)
         else:
             raise SystemExit("No FTM calls can be made on this dataset.")
-        ftm_counts = dd.from_pandas(ftm_counts,
-                                    npartitions=self.cpus)
         
         # output ftm to file
         ftm_file = os.path.join(self.output_dir, "ftm_calls/")
@@ -625,7 +634,7 @@ class FTM():
         
         # filter all counts 
         all_counts = self.filter_allCalls(all_calls)
-
+        
         return all_counts, hamming_df, ftm_counts
 
         

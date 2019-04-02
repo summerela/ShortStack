@@ -234,8 +234,8 @@ class ShortStack():
         # check that file paths are valid
         self.file_check(self.encoding_file)
         self.file_check(self.target_fa)
-             
-                                          
+               
+                                            
         #########################
         ####   Parse Input   ####
         #########################
@@ -246,16 +246,16 @@ class ShortStack():
                                         self.encoding_file,
                                         self.cpus, 
                                         self.client)
-                                                    
+                                                      
         mutation_df, fasta_df, encoding_df = parse.main_parser()
-        
+          
         # read in s6 parquet
         glob_path = '{}/*.parquet'.format(self.input_s6)
         files = glob.glob(glob_path)
         if len(files) < 1:
             raise SystemExit("Check path to parquet S6 directory.")
         s6_df = dd.read_parquet(files)
-                   
+                     
         ########################
         ####   Encode S6    ####
         ########################
@@ -266,14 +266,14 @@ class ShortStack():
                                       self.output_dir,
                                       self.cpus, 
                                       self.client)
-                                                
+                                                  
         # return dataframe of targets found for each molecule   
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                             
+                               
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-                                              
+                                                
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -293,12 +293,12 @@ class ShortStack():
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-                                
+                                  
         ###############
         ###   FTM   ###
         ###############
         print("Running FTM...\n")
-                                  
+                                    
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
                               encoded_df, 
@@ -320,11 +320,11 @@ class ShortStack():
         all_counts.to_parquet(all_counts_dir, 
                               append=False,
                               engine="fastparquet")          
-        
+  
         # cleanup 
         del encoded_df, mutant_fasta
         gc.collect()
-                                     
+                                      
         #############################
         ###   valid off targets   ###
         #############################
@@ -378,19 +378,24 @@ class ShortStack():
 #             final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
 #                                      
 #         save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
-                                     
-        # clean up
-        del parity_df, s6_df, hamming_df
-        gc.collect()
-               
-        # check for ftm_only option
-        if self.ftm_only:
-            ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
-            raise SystemExit(ftm_message)
-        else:
-            print("FTM complete. Sequencing results...\n")
-
-          
+#                                       
+#         # clean up
+#         del parity_df, s6_df, hamming_df
+#         gc.collect()
+#                 
+#         # check for ftm_only option
+#         if self.ftm_only:
+#             ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
+#             raise SystemExit(ftm_message)
+#         else:
+#             print("FTM complete. Sequencing results...\n")
+             
+#         all_counts.to_parquet("./all_counts", append=False,engine="fastparquet", compression='snappy')
+#         fasta_df.to_parquet("./fasta", append=False,engine="fastparquet", compression='snappy')
+         
+#         fasta_df = dd.read_parquet("./fasta")
+#         all_counts = dd.read_parquet("all_counts")
+ 
         ####################
         ###   Sequence   ###
         ####################
@@ -402,7 +407,9 @@ class ShortStack():
                                  self.cpus,
                                  self.client)
                            
-        molecule_df, ref_df = sequence.main()
+        molecule_df = sequence.main()
+
+        raise SystemExit("Molecule sequencing complete.\n")
 
         ####################
         ###   Consensus   ##
@@ -410,7 +417,7 @@ class ShortStack():
         print("Calculating allele frequencies...\n") 
         # instantiate sequencing module from sequencer.py
         consensus = cons.Consensus(molecule_df,
-                                 ref_df,
+                                 fasta_df,
                                  self.output_dir, 
                                  self.cpus,
                                  self.client,
