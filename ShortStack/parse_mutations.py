@@ -119,9 +119,9 @@ class AssembleMutations():
     
         # process deletions
         input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
-            [seq[0:n] for n, seq in zip((input_df.var_start-input_df.mut_length), input_df.ref_seq)] +  \
+            [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] +  \
             input_df["alt"] + \
-            [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
+            [seq[n:] for n, seq in zip((input_df.var_start + input_df.mut_length + 1), input_df.ref_seq)]
                 
         # process insertions
         input_df.alt_seq[(input_df['mut_type'] == 'INS')] = \
