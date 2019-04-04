@@ -426,7 +426,7 @@ class FTM():
         '''
 
         second_div = x.feature_div.min()
-        result = x[x.feature_div > (2 * second_div)]
+        result = x[x.feature_div > second_div]
 
         # if there is only one result now, return it
         if len(result) == 1:
