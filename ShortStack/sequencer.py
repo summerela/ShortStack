@@ -5,16 +5,10 @@ sequencer.py
 import sys, warnings, logging, re, os, swifter, dask, psutil
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
-import cython_funcs as cpy
 from numba import jit
-import numpy as np
 import pandas as pd
-import networkx as nx
 from collections import defaultdict, Counter
 from Bio import pairwise2
-import dask.dataframe as dd
-from dask.dataframe.io.tests.test_parquet import npartitions
-from dask.bag.core import split
 dask.config.set(scheduler='tasks')
 pd.set_option('display.max_columns', 100)
 
@@ -61,8 +55,20 @@ class Sequencer():
         
         # coerce results to dataframe         
         base_df = pd.DataFrame.from_dict(graph, orient='index')
-        base_df = base_df.fillna(0)
+
+        # ensure that dataframe contains all possible nuc columns
+        col_list = ["A", "T", "G", "C", "-"]
+        for col in col_list:
+            if col not in base_df:
+                base_df[col] = 0.0
+
+        # replace NaN with 0.0
+        base_df = base_df.fillna(0.0)
+
+        # pull out nuc with max count
         base_df["nuc"] = base_df.idxmax(axis=1)
+
+        # add regional info
         base_df["region"] = grp.region.unique()[0]
         
         return base_df
@@ -110,14 +116,26 @@ class Sequencer():
         # split reads up by base
         base_df = self.counts.groupby(["FeatureID"]).apply(self.get_path).reset_index(drop=False)
         base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "max_nuc", "region"]
-        
+
+        # save to a file
+        base_out = os.path.join(self.output_dir, "base_counts.tsv")
+        base_df.to_csv(base_out, index=False, sep="\t")
+
         print("Determining consensus sequence...\n")
         ## return consensus sequence
         seq_list = base_df.groupby("FeatureID").apply(self.join_seq)
         df = pd.DataFrame(seq_list).reset_index(drop=True)
         df1 = pd.DataFrame(df[0].tolist(), index=df.index) 
         seq_df = pd.DataFrame(df1[0].tolist(), index=df1.index) 
-        seq_df.columns = ["FeatureID", "region", "feature_seq"] 
+        seq_df.columns = ["FeatureID", "region", "feature_seq"]
+
+        seq_df.to_csv("/home/selasady/ShortStack/ShortStack/feasibility/seq_df.tsv", sep="\t", index=False)
+        self.fasta.to_csv("/home/selasady/ShortStack/ShortStack/feasibility/fasta.tsv", sep="\t", index=False)
+
+        print(self.fasta.head())
+        print(self.fasta.dtypes)
+        print(seq_df.head())
+        print(seq_df.dtypes)
         
         print("Adding reference sequences to align...\n")
         ## add reference sequence for each feature
