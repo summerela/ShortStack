@@ -424,54 +424,65 @@ class FTM():
             x = feature's top two rows
         output: used in return_ftm to return ties that pass this filtering logic
         '''
-        
-        # find second highest count
-        second_max = x.counts.min()
-        
-        # check if result with max count >= 3x second count
-        result = x[x.counts > (3 * second_max)]
-        
-        # if there is only one result, return it
+
+        second_div = x.feature_div.min()
+        result = x[x.feature_div > (2 * second_div)]
+
+        # if there is only one result now, return it
         if len(result) == 1:
             return result
-        # otherwise check feature div
+
+        # otherwise no call can be made
         else:
-            second_div = x.feature_div.min()
-            result = x[x.feature_div > (2 * second_div)]
-             
-            # if there is only one result now, return it
-            if len(result) == 1:
-                return result
-                  
-            # otherwise check symmetrical difference
-            else:
-                
-                # pull out targets for each region
-                group = dd.merge(x, bc_counts2,
-                                 on=["FeatureID", "region"],
-                                 how='left').drop_duplicates()
-                group = self.client.compute(group)
-                group = self.client.gather(group)
-                
-                # create a list of targest for each region
-                target_df = group.groupby(["FeatureID", "region"])["Target"].apply(set).reset_index()
-                
-                # calculate Targets unique to each region of interest
-                target_df["sym_diff"] = cpy.calc_symmetricDiff(target_df)
-
-                target_df = target_df.reset_index(drop=True)
-
-                # take top sym_diff score for group
-                max_symDiff = target_df.sym_diff.max()    
-                result = target_df[target_df.sym_diff == max_symDiff]
-                
-                if len(result) == 1:
-                     
-                    result = result.drop(["sym_diff", "Target"], axis=1)
-                    result = x.merge(result,
-                                on=["FeatureID", "region"])
-                else:
-                    pass
+            pass
+        
+        # # find second highest count
+        # second_max = x.counts.min()
+        #
+        # # check if result with max count >= 3x second count
+        # result = x[x.counts > (3 * second_max)]
+        #
+        # # if there is only one result, return it
+        # if len(result) == 1:
+        #     return result
+        # # otherwise check feature div
+        # else:
+        #     second_div = x.feature_div.min()
+        #     result = x[x.feature_div > (2 * second_div)]
+        #
+        #     # if there is only one result now, return it
+        #     if len(result) == 1:
+        #         return result
+        #
+        #     # otherwise check symmetrical difference
+        #     else:
+        #
+        #         # pull out targets for each region
+        #         group = dd.merge(x, bc_counts2,
+        #                          on=["FeatureID", "region"],
+        #                          how='left').drop_duplicates()
+        #         group = self.client.compute(group)
+        #         group = self.client.gather(group)
+        #
+        #         # create a list of targest for each region
+        #         target_df = group.groupby(["FeatureID", "region"])["Target"].apply(set).reset_index()
+        #
+        #         # calculate Targets unique to each region of interest
+        #         target_df["sym_diff"] = cpy.calc_symmetricDiff(target_df)
+        #
+        #         target_df = target_df.reset_index(drop=True)
+        #
+        #         # take top sym_diff score for group
+        #         max_symDiff = target_df.sym_diff.max()
+        #         result = target_df[target_df.sym_diff == max_symDiff]
+        #
+        #         if len(result) == 1:
+        #
+        #             result = result.drop(["sym_diff", "Target"], axis=1)
+        #             result = x.merge(result,
+        #                         on=["FeatureID", "region"])
+        #         else:
+        #             pass
     
     @jit(parallel=True)
     def process_multis(self, multi_df, bc_counts2):
