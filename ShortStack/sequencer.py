@@ -32,7 +32,6 @@ class Sequencer():
         self.fasta = fasta_df
         self.fasta.columns = ['ref_seq', 'id', 'chrom', 'start', 'stop', 'build', 'strand', 'region']
         self.output_dir = out_dir
-        
         self.client = client
     
     @jit(parallel=True)   
@@ -115,7 +114,7 @@ class Sequencer():
         print("Counting reads per base...\n")
         # split reads up by base
         base_df = self.counts.groupby(["FeatureID"]).apply(self.get_path).reset_index(drop=False)
-        base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "max_nuc", "region"]
+        base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "-", "max_nuc", "region"]
 
         # save to a file
         base_out = os.path.join(self.output_dir, "base_counts.tsv")
@@ -128,14 +127,6 @@ class Sequencer():
         df1 = pd.DataFrame(df[0].tolist(), index=df.index) 
         seq_df = pd.DataFrame(df1[0].tolist(), index=df1.index) 
         seq_df.columns = ["FeatureID", "region", "feature_seq"]
-
-        seq_df.to_csv("/home/selasady/ShortStack/ShortStack/feasibility/seq_df.tsv", sep="\t", index=False)
-        self.fasta.to_csv("/home/selasady/ShortStack/ShortStack/feasibility/fasta.tsv", sep="\t", index=False)
-
-        print(self.fasta.head())
-        print(self.fasta.dtypes)
-        print(seq_df.head())
-        print(seq_df.dtypes)
         
         print("Adding reference sequences to align...\n")
         ## add reference sequence for each feature
@@ -150,6 +141,10 @@ class Sequencer():
         seq_df["alignment"] = seq_df.apply(self.align_seqs, 
                                            axis=1)
 #         seq_df = seq_df.drop("ref_seq", axis=1) # uncomment after testing
+
+        # save alignment seqs to file
+        seq_out = os.path.join(self.output_dir, "consensus_alignments.tsv")
+        seq_df.to_csv(seq_out, sep="\t", index=False)
 
         return seq_df
     
