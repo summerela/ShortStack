@@ -58,15 +58,11 @@ from logging.handlers import TimedRotatingFileHandler    # set time limit of 31 
 import configparser as cp   # parse config files 
 import argparse    #parse user arguments
 import pandas as pd
-import numpy as np 
-import concurrent.futures as cf
 from numba import jit
 import pyximport; pyximport.install()
 from dask.distributed import Client
 import dask.dataframe as dd
-from dask.dataframe.io.tests.test_parquet import npartitions
 pd.options.mode.chained_assignment = None
-
 
 # set runtime options
 dask.config.set(shuffle='tasks')
@@ -77,7 +73,6 @@ import encoder
 import parse_mutations as mut
 import ftm
 import sequencer as seq
-import consensus as cons
 
 # get path to config file
 parser = argparse.ArgumentParser(description='Run ShortStack program.')
@@ -111,7 +106,7 @@ class ShortStack():
         self.hamming_weight = int(hamming_weight)
         self.ftm_HD0_only = ftm_HD0_only
         self.ftm_only = ftm_only
-        self.mem_limit = psutil.virtual_memory().free - 1000
+        self.mem_limit = psutil.virtual_memory().available - 1000
         self.cpus = int(psutil.cpu_count())
         self.client = Client(name="HexSembler",
                              memory_limit=self.mem_limit,
@@ -141,7 +136,7 @@ class ShortStack():
         
         ### Setup logging ###
         now = time.strftime("%Y%d%m_%H:%M:%S")
-        today_file = "{}_ShortStack.log".format(self.today)
+        today_file = "{}_HexSembler.log".format(self.today)
         log_file = os.path.join(self.log_path, today_file)
         FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
         logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
@@ -234,46 +229,46 @@ class ShortStack():
         # check that file paths are valid
         self.file_check(self.encoding_file)
         self.file_check(self.target_fa)
-               
-                                            
+
+
         #########################
         ####   Parse Input   ####
         #########################
-        # instantiate parsing class from parse_input.py 
+        # instantiate parsing class from parse_input.py
         parse = parse_input.Parse_files(self.output_dir,
                                         self.target_fa,
-                                        self.mutation_vcf, 
+                                        self.mutation_vcf,
                                         self.encoding_file,
-                                        self.cpus, 
+                                        self.cpus,
                                         self.client)
-                                                      
+
         mutation_df, fasta_df, encoding_df = parse.main_parser()
-          
+
         # read in s6 parquet
         glob_path = '{}/*.parquet'.format(self.input_s6)
         files = glob.glob(glob_path)
         if len(files) < 1:
             raise SystemExit("Check path to parquet S6 directory.")
         s6_df = dd.read_parquet(files)
-                     
+
         ########################
         ####   Encode S6    ####
         ########################
         print("Encoding targets...\n")
         # instantiate encoder class from encoder.py
-        encode = encoder.Encode_files(s6_df, 
-                                      encoding_df, 
+        encode = encoder.Encode_files(s6_df,
+                                      encoding_df,
                                       self.output_dir,
-                                      self.cpus, 
+                                      self.cpus,
                                       self.client)
-                                                  
-        # return dataframe of targets found for each molecule   
+
+        # return dataframe of targets found for each molecule
         encoded_df, parity_df = encode.main(encoding_df, s6_df)
-                               
+
         # cleanup encoding_df
         del encoding_df
         gc.collect()
-                                                
+
         ###################################
         ####   Assemble Mutations    #####
         ###################################
@@ -284,24 +279,24 @@ class ShortStack():
             self.log.info("Mutations assembled from:\n {}".format(self.mutation_vcf))
             # instantiate aligner module
             mutations = mut.AssembleMutations(fasta_df,
-                                          mutation_df, 
-                                          s6_df)  
-            # add mutated reference sequences to fasta_df        
+                                          mutation_df,
+                                          s6_df)
+            # add mutated reference sequences to fasta_df
             mutant_fasta = mutations.main()
         # no mutations provided = unsupervised mode and mutant_fasta is empty
         else:
             mut_message = "No mutations provided."
             self.log.info(mut_message)
             mutant_fasta = pd.DataFrame()
-                                  
+
         ###############
         ###   FTM   ###
         ###############
         print("Running FTM...\n")
-                                    
+
         # instantiate FTM module from ftm.py
         run_ftm = ftm.FTM(fasta_df,
-                              encoded_df, 
+                              encoded_df,
                               mutant_fasta,
                               self.covg_threshold,
                               self.max_hamming_dist,
@@ -317,123 +312,108 @@ class ShortStack():
         all_counts_dir = os.path.join(self.output_dir, "all_counts")
         if os.path.exists(all_counts_dir):
             shutil.rmtree(all_counts_dir, ignore_errors=True)
-        all_counts.to_parquet(all_counts_dir, 
+        all_counts.to_parquet(all_counts_dir,
                               append=False,
-                              engine="fastparquet")          
-  
-        # cleanup 
+                              engine="fastparquet")
+
+        # cleanup
         del encoded_df, mutant_fasta
         gc.collect()
-                                      
-        #############################
-        ###   valid off targets   ###
-        #############################
-#         # save valid barcodes that are off target
-#         print("Saving off-target barcode information...\n")                   
-#         
-#         @jit(parallel=True)      
-#         def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
-#                              
-#             # filter s6 for valid 3spotters not found in encoding file
-#             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(), 
-#                                 on=['FeatureID','BC', 'pool', 'cycle'], 
-#                                 how='left', indicator=True)
-#                                         
-#             # pull out feature id's/basecalls that are only in s6_df and not in invalids
-#             no_invalids = no_invalids[no_invalids._merge == "left_only"]
-#             no_invalids = no_invalids.drop(["_merge", "idx"], axis=1)
-# 
-#                                                 
-#             # prep hamming_df for merge
-#             hamming_df = hamming_df[["FeatureID", "BC", "cycle", "pool"]]
-#             hamming_df = hamming_df.drop_duplicates().reset_index(drop=True) 
-#                                    
-#             # pull out featureID/BC that are in s6 but not in hamming=not hitting targets
-#             valid_offTargets = dd.merge(no_invalids, hamming_df,  
-#                        how='left', indicator=True)  
-#             
-#             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
-#             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-#             
-#                            
-#             # pull out features with ftm votes
-#             final_offTargets = dd.merge(valid_offTargets, 
-#                                         ftm_calls[["FeatureID"]],
-#                                         on=["FeatureID"],
-#                                         how='left',
-#                                         indicator=True)
-#             final_offTargets = final_offTargets[final_offTargets._merge == "left_only"]
-#             final_offTargets = final_offTargets.drop(["_merge"], axis=1)
-#             raise SystemExit(final_offTargets.head())      
-#             # compute data frame                      
-#             final_offTargets = self.client.compute(final_offTargets)
-#             final_offTargets = self.client.gather(final_offTargets)
-#                    
-#             # sort output
-#             final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
-#                                                                 "cycle", "BC"])
-#                                                 
-#             # save to file
-#             valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
-#             final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-#                                      
-#         save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
-#                                       
-#         # clean up
-#         del parity_df, s6_df, hamming_df
-#         gc.collect()
-#                 
-#         # check for ftm_only option
-#         if self.ftm_only:
-#             ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
-#             raise SystemExit(ftm_message)
-#         else:
-#             print("FTM complete. Sequencing results...\n")
-             
-#         all_counts.to_parquet("./all_counts", append=False,engine="fastparquet", compression='snappy')
-#         fasta_df.to_parquet("./fasta", append=False,engine="fastparquet", compression='snappy')
-         
-#         fasta_df = dd.read_parquet("./fasta")
-#         all_counts = dd.read_parquet("all_counts")
- 
-        ####################
+#
+#         #############################
+#         ###   valid off targets   ###
+#         #############################
+# #         # save valid barcodes that are off target
+# #         print("Saving off-target barcode information...\n")
+# #
+# #         @jit(parallel=True)
+# #         def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
+# #
+# #             # filter s6 for valid 3spotters not found in encoding file
+# #             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(),
+# #                                 on=['FeatureID','BC', 'pool', 'cycle'],
+# #                                 how='left', indicator=True)
+# #
+# #             # pull out feature id's/basecalls that are only in s6_df and not in invalids
+# #             no_invalids = no_invalids[no_invalids._merge == "left_only"]
+# #             no_invalids = no_invalids.drop(["_merge", "idx"], axis=1)
+# #
+# #
+# #             # prep hamming_df for merge
+# #             hamming_df = hamming_df[["FeatureID", "BC", "cycle", "pool"]]
+# #             hamming_df = hamming_df.drop_duplicates().reset_index(drop=True)
+# #
+# #             # pull out featureID/BC that are in s6 but not in hamming=not hitting targets
+# #             valid_offTargets = dd.merge(no_invalids, hamming_df,
+# #                        how='left', indicator=True)
+# #
+# #             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
+# #             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
+# #
+# #
+# #             # pull out features with ftm votes
+# #             final_offTargets = dd.merge(valid_offTargets,
+# #                                         ftm_calls[["FeatureID"]],
+# #                                         on=["FeatureID"],
+# #                                         how='left',
+# #                                         indicator=True)
+# #             final_offTargets = final_offTargets[final_offTargets._merge == "left_only"]
+# #             final_offTargets = final_offTargets.drop(["_merge"], axis=1)
+# #             raise SystemExit(final_offTargets.head())
+# #             # compute data frame
+# #             final_offTargets = self.client.compute(final_offTargets)
+# #             final_offTargets = self.client.gather(final_offTargets)
+# #
+# #             # sort output
+# #             final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
+# #                                                                 "cycle", "BC"])
+# #
+# #             # save to file
+# #             valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
+# #             final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
+# #
+# #         save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
+# #
+# #         # clean up
+# #         del parity_df, s6_df, hamming_df
+# #         gc.collect()
+# #
+# #         # check for ftm_only option
+# #         if self.ftm_only:
+# #             ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
+# #             raise SystemExit(ftm_message)
+# #         else:
+# #             print("FTM complete. Sequencing results...\n")
+# #
+        # ####################
         ###   Sequence   ###
         ####################
-        print("Sequencing...\n")        
-        # instantiate sequencing module from sequencer.py
+        print("Sequencing...\n")
+        # instantiate molecule sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,
                                  fasta_df,
                                  self.output_dir,
                                  self.cpus,
                                  self.client)
-                           
+
         molecule_df = sequence.main()
 
-        raise SystemExit("Molecule sequencing complete.\n")
+        # saving output for consensus sequencing
+        fasta_out = os.path.join(self.output_dir, "molecule_info/fasta")
+        fasta_df.to_parquet(fasta_out, append=False, engine="fastparquet", compression='snappy')
 
-        ####################
-        ###   Consensus   ##
-        ####################
-        print("Calculating allele frequencies...\n") 
-        # instantiate sequencing module from sequencer.py
-        consensus = cons.Consensus(molecule_df,
-                                 fasta_df,
-                                 self.output_dir, 
-                                 self.cpus,
-                                 self.client,
-                                 self.today)
-           
-           
-        consensus.main()
-        
+        molecule_out = os.path.join(self.output_dir, "molecule_info/molecules")
+        molecule_df.to_parquet(molecule_out, append=False, engine="fastparquet", compression='snappy')
+
+        print('Molecule parquet files saved to {}/molecule_info/molecules'.format(self.output_dir))
+        print('Fasta_df parquet files saved to {}/molecule_info/fasta'.format(self.output_dir))
+
         # close dask tasks
         self.client.close()
-        
+
         # cleanup temp files and directories
         dask_folder = os.path.join(os.path.curdir, "dask-worker-space")
         shutil.rmtree(dask_folder)
-        
-        print("ShortStack pipline complete.")
         
         
 if __name__ == "__main__":
@@ -442,12 +422,11 @@ if __name__ == "__main__":
     config = cp.ConfigParser()
     configFilePath = args.config
     config.read(configFilePath)
-    
+
     sStack = ShortStack(config_path=args.config,
-                
                 output_dir=config.get("user_facing_options","output_dir"),
-                input_s6=config.get("user_facing_options", "input_s6"), 
-                target_fa=config.get("user_facing_options","target_fa"), 
+                input_s6=config.get("user_facing_options", "input_s6"),
+                target_fa=config.get("user_facing_options","target_fa"),
                 mutation_vcf=config.get("user_facing_options", "mutation_vcf"),
                 encoding_table=config.get("user_facing_options", "encoding_table"),
                 log_path=config.get("internal_options", "logFile_path"),
