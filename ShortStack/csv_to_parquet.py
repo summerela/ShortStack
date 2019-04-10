@@ -120,8 +120,7 @@ if __name__=="__main__":
       
     # read in the csv
     for file in os.listdir(csv_dir):
-        # if "S6" in file:
-        if file == "20190216_210503_C1_C50_F010_S6.csv":
+        if "S6" in file:
             full_path = os.path.join(csv_dir, file)
             s6_df = read_s6(full_path)
 
