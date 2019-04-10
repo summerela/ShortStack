@@ -37,7 +37,7 @@ def read_s6(input_s6):
     df = dd.read_csv(input_s6, dtype='object',
                      blocksize='100000MB',
                      error_bad_lines=False)
-    
+
     # Remove cheeky comma column, if it exists
     df = df.loc[:,~df.columns.str.contains('^Unnamed')]
     # Remove whitespace from column headers
@@ -51,18 +51,17 @@ def read_s6(input_s6):
 
     df["FeatureID"] = df["fov"].astype(str) + "_" + df["x"].astype(str) + "_" + df["y"].astype(str)
 
-    # # if these columns are in the file, remove after no longer needed
+    # if these columns are in the file, remove after no longer needed
     drop_list = ["Features", "fov", "x", "y"]
     for col in drop_list:
         if col in df.columns:
-            df.drop([col], axis=1)
-    
+            df = df.drop(col, axis=1)
     return df
 
 @jit(parallel=True)
 def melt(frame, id_vars=None, value_vars=None, var_name=None,
-     value_name='value', col_level=None):
-    return frame.map_partitions(pd.melt, meta=no_default, id_vars=id_vars,
+         value_name='value', col_level=None):
+    return frame.map_partitions(pd.melt, id_vars=id_vars,
                                 value_vars=value_vars,
                                 var_name=var_name, value_name=value_name,
                                 col_level=col_level, token='melt')
@@ -78,6 +77,7 @@ def parse_s6(input_s6):
 
     s6_df['BC'] = s6_df['BC'].astype('int')
 
+    print("Filtering out invalid barcodes.")
     # filter out invalid reads
     s6_df = s6_df[s6_df.BC != 0]
     s6_df = s6_df[s6_df.BC > 111111]
@@ -87,6 +87,7 @@ def parse_s6(input_s6):
     # filter out rows where basecall contains uncalled bases of 0
     s6_df = s6_df[~s6_df.BC.str.contains("0")]
 
+    print("Storing pool and cycle information.")
     # split up pool and cycle info
     s6_df["cycle"] = s6_df['variable'].str.partition('P')[0]
     s6_df["pool"] = s6_df['variable'].str.partition('P')[2]
@@ -110,28 +111,28 @@ if __name__=="__main__":
     # check for required args
     arguments = len(sys.argv) - 1
     if arguments < 2:
-        raise SystemExit("Please enter the path to the folder containing your csv files(s) and desired output directory.")
+        raise SystemExit("Please enter path to the folder containing your csv files(s), desired output directory and s6 naming format as old or new.")
 
     # gather file paths
     csv_dir = sys.argv[1]
     outdir = sys.argv[2]
+
       
     # read in the csv
-    file_counter = 0
-
     for file in os.listdir(csv_dir):
-        if file.endswith("_S6.csv"):
+        # if "S6" in file:
+        if file == "20190216_210503_C1_C50_F010_S6.csv":
             full_path = os.path.join(csv_dir, file)
             s6_df = read_s6(full_path)
 
             # # filter and output as parquet
             s6_df = parse_s6(s6_df)
-            file_counter += 1
-            #
-            # # write out to parquet
-            file_name = file.split(".")[0] + "_" + str(file_counter)
+
+            #write out to parquet
+            file_name = file.split(".")[0]
             outfile = os.path.join(outdir, file_name)
 
+            print("Saving data to parquet.")
             s6_df.to_parquet(outfile,
                              append=False,
                              engine='fastparquet',
