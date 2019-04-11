@@ -20,7 +20,7 @@ Dependencies:
 from dask.distributed import Client
 from dask.dataframe.core import no_default
 import dask.dataframe as dd
-import sys, os
+import sys, os, time
 from numba import jit
 import pandas as pd
 import warnings
@@ -110,12 +110,14 @@ if __name__=="__main__":
 
     # check for required args
     arguments = len(sys.argv) - 1
-    if arguments < 2:
-        raise SystemExit("Please enter path to the folder containing your csv files(s), desired output directory and s6 naming format as old or new.")
+    if arguments < 3:
+        raise SystemExit("Please enter path to the folder containing your csv files(s), \
+                         desired output directory and output file name prefix.")
 
     # gather file paths
     csv_dir = sys.argv[1]
     outdir = sys.argv[2]
+    file_prefix = sys.argv[3]
 
       
     # read in the csv
@@ -124,11 +126,12 @@ if __name__=="__main__":
             full_path = os.path.join(csv_dir, file)
             s6_df = read_s6(full_path)
 
-            # # filter and output as parquet
+            # filter and output as parquet
             s6_df = parse_s6(s6_df)
 
             #write out to parquet
-            file_name = file.split(".")[0]
+            today = str(time.strftime("%Y%m%d"))
+            file_name = file_prefix + "_" + str(file.split(".")[0]) + "_" + today
             outfile = os.path.join(outdir, file_name)
 
             print("Saving data to parquet.")
