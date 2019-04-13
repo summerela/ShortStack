@@ -5,7 +5,8 @@
 
 [user_facing_options]
 output_dir = ./
-input_s6=./example_files/s6_parquet/
+input_s6=./example_files/test_input/
+file_prefix=FOV1
 target_fa=./example_files/kras_nras.fa
 encoding_table=./example_files/encoding.txt
 mutation_vcf=./example_files/kras_nras_mutant.vcf

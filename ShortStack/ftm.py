@@ -6,22 +6,14 @@ ftm.py
 - returns FTM calls
 '''
 
-import sys, os, logging, dask, psutil, gc, shutil
+import sys, os, logging, shutil
 import warnings
-from IPython.utils.sysinfo import num_cpus
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
-from numpy import single
 import cython_funcs as cpy
 from numba import jit
-import numpy as np
 import pandas as pd
-from collections import Counter
 import dask.dataframe as dd
-from dask.dataframe.io.tests.test_parquet import npartitions
-from collections import defaultdict
-from itertools import chain      
-from dask.array.random import normal
 pd.options.mode.chained_assignment = None
 
 # import logger
@@ -30,12 +22,13 @@ log = logging.getLogger(__name__)
 class FTM():
     
     def __init__(self, fasta_df, encoded_df, 
-                 mutant_fasta, coverage_threshold, 
-                 max_hamming_dist,
+                 mutant_fasta, prefix,
+                 coverage_threshold, max_hamming_dist,
                  output_dir, diversity_threshold,
                  hamming_weight, ftm_HD0_only, cpus, client):
         self.fasta_df = fasta_df
         self.encoded_df = encoded_df
+        self.file_prefix = prefix
         self.mutant_fasta = mutant_fasta
         self.coverage_threshold = coverage_threshold
         self.max_hamming_dist = max_hamming_dist
@@ -206,7 +199,7 @@ class FTM():
                                  "BC", "cycle", "pool", "hamming"]]
         
         # save raw hamming counts to file and remove from memory
-        outfile = os.path.join(self.output_dir, "rawCounts")
+        outfile = os.path.join(self.output_dir, self.file_prefix + "_rawCounts")
         if os.path.exists(outfile):
             shutil.rmtree(outfile, ignore_errors=True)
         hamming_df.to_parquet(outfile, 
@@ -527,7 +520,7 @@ class FTM():
         if len(no_calls) > 0:
            
             # save no_call info to file
-            no_ftm_file = os.path.join(self.output_dir, "no_ftm_calls")
+            no_ftm_file = os.path.join(self.output_dir, self.file_prefix + "_no_ftm_calls")
             if os.path.exists(no_ftm_file):
                 shutil.rmtree(no_ftm_file, ignore_errors=True)
             no_calls.to_parquet(no_ftm_file,
@@ -546,8 +539,9 @@ class FTM():
           
         # group counts together for each bar code
         all_calls = self.barcode_counts(all_norm)
+        all_calls = all_calls.repartition(npartitions=self.cpus)
         
-        counts_file = os.path.join(self.output_dir, "all_counts") 
+        counts_file = os.path.join(self.output_dir, self.file_prefix + "_all_counts")
         if os.path.exists(counts_file):
             shutil.rmtree(counts_file, ignore_errors=True)
         all_calls.to_parquet(counts_file, 
@@ -595,7 +589,7 @@ class FTM():
               
         # save basecall normalized counts to file
         # save raw hamming counts to file and remove from memory
-        bc_out = os.path.join(self.output_dir, "bc_counts") 
+        bc_out = os.path.join(self.output_dir, self.file_prefix + "_bc_counts")
         if os.path.exists(bc_out):
             shutil.rmtree(bc_out, ignore_errors=True) 
         bc_counts.to_parquet(bc_out, 
@@ -632,7 +626,7 @@ class FTM():
             raise SystemExit("No FTM calls can be made on this dataset.")
         
         # output ftm to file
-        ftm_file = os.path.join(self.output_dir, "ftm_calls/")
+        ftm_file = os.path.join(self.output_dir, self.file_prefix + "_ftm_calls/")
         # remove any existing directories
         if os.path.exists(ftm_file):
             shutil.rmtree(ftm_file, ignore_errors=True)

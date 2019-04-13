@@ -19,12 +19,13 @@ log = logging.getLogger(__name__)
 class Encode_files():
     
     # instance parameters
-    def __init__(self, s6_df, encoding_df, output_dir, cpus, client):
+    def __init__(self, s6_df, encoding_df, output_dir, prefix, cpus, client):
         self.s6_df = s6_df
         self.col_names =  [x for x in self.s6_df.columns]
         self.encoding_df = encoding_df
         self.out_dir = output_dir
-        self.invalids_file = os.path.join(self.out_dir, "invalids")
+        self.prefix = prefix
+        self.invalids_file = os.path.join(self.out_dir, self.prefix + "_invalids")
         self.cpus = cpus
         self.client = client
     
