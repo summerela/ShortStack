@@ -115,19 +115,22 @@ class ShortStack():
         # initialize file paths and output dirs
         self.encoding_file = os.path.abspath(encoding_table)
         self.log_path = os.path.abspath(log_path)
-        self.output_dir = os.path.join(output_dir, "output")
         self.config_path = os.path.abspath(config_path)
 
-        # create output dir if not exists
-        self.create_outdir(self.output_dir)
+
 
         # gather input file locations
         self.input_s6 = os.path.abspath(input_s6)
         self.today = time.strftime("%Y%m%d")
         self.file_prefix = file_prefix + "_" + self.today + "_" + (str(os.path.basename(self.input_s6)))
+        self.output_dir = os.path.join(output_dir, "output", self.file_prefix)
         self.target_fa = os.path.abspath(target_fa)
         self.mutation_vcf = mutation_vcf
 
+        # create output dir if not exists
+        self.create_outdir(self.output_dir)
+
+        # create vcf file object if present
         if self.mutation_vcf.lower() != "none":
             self.mutation_vcf = os.path.abspath(mutation_vcf)
             self.file_check(self.mutation_vcf)
@@ -136,7 +139,7 @@ class ShortStack():
 
         ### Setup logging ###
         now = time.strftime("%Y%d%m_%H:%M:%S")
-        today_file = "{}_HexSembler.log".format(self.today)
+        today_file = "{}_{}_HexSembler.log".format(self.file_prefix, self.today)
         log_file = os.path.join(self.log_path, today_file)
         FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
         logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
