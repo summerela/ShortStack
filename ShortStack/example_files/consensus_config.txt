@@ -1,0 +1,9 @@
+# HexSembler Consensus Config File
+# do not use quotes around strings
+
+[options]
+molecule_files=/home/selasady/ShortStack/ShortStack/feasibility/output
+fasta_dataframe=/home/selasady/ShortStack/ShortStack/feasibility/output/feasibility_20190414_fasta.tsv
+output_prefix=feasibility
+output_dir=./
+log_path=./
