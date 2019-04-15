@@ -177,6 +177,9 @@ class Parse_files():
         # assume that fasta only contains one wt per region
         fasta_df["region"] = fasta_df["id"]
 
+        # remove new line chars from fasta sequence
+        fasta_df["seq"] = fasta_df.seq.str.strip()
+
         fasta_df = fasta_df.reset_index(drop=True)
 
         return fasta_df
