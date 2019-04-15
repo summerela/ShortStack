@@ -41,27 +41,20 @@ To run, type the following from the command line:
 python run_shortstack.py -c path/to/config.txt
 '''
 #### import packages required to load modules ####
-import logging, logging.config  # required for seqlog formatting
-import sys, os, time, psutil, gc, dask, glob, shutil
-import warnings
-
+import logging, logging.config
+import sys, os, time, psutil, gc, dask, glob, shutil,csv, warnings, argparse, pyximport
 if not sys.warnoptions:
     warnings.simplefilter("ignore")  # ignore dask connection warnings
 from logging.handlers import RotatingFileHandler  # set max log size before rollover
 from logging.handlers import TimedRotatingFileHandler  # set time limit of 31 days on log files
-import configparser as cp  # parse config files
-import argparse  # parse user arguments
+import configparser as cp
 import pandas as pd
 from numba import jit
-import pyximport;
-
-pyximport.install()
 from dask.distributed import Client
 import dask.dataframe as dd
 
+pyximport.install()
 pd.options.mode.chained_assignment = None
-
-# set runtime options
 dask.config.set(shuffle='tasks')
 
 # import shortstack modules
@@ -117,12 +110,10 @@ class ShortStack():
         self.log_path = os.path.abspath(log_path)
         self.config_path = os.path.abspath(config_path)
 
-
-
         # gather input file locations
         self.input_s6 = os.path.abspath(input_s6)
         self.today = time.strftime("%Y%m%d")
-        self.file_prefix = file_prefix + "_" + self.today + "_" + (str(os.path.basename(self.input_s6)))
+        self.file_prefix = file_prefix + "_" + self.today
         self.output_dir = os.path.join(output_dir, "output", self.file_prefix)
         self.target_fa = os.path.abspath(target_fa)
         self.mutation_vcf = mutation_vcf
@@ -193,8 +184,7 @@ class ShortStack():
         # write run info to log
         self.log.info(run_string)
 
-    @staticmethod
-    def create_outdir(output_dir):
+    def create_outdir(self, output_dir):
         '''
         Check if a directory exists, and if not, create it
         :param output_dir: path to directory
@@ -205,8 +195,8 @@ class ShortStack():
                 os.makedirs(output_dir)
         except AssertionError as e:
             error_message = "Unable to create output dir at: {}".format(output_dir, e)
-            log.error(error_message)
-            raise SystemExit(error_msg)
+            self.log.error(error_message)
+            raise SystemExit(error_message)
 
     @jit(parallel=True)
     def file_check(self, input_file):
@@ -405,10 +395,13 @@ class ShortStack():
 
         # saving output for consensus sequencing
         fasta_out = os.path.join(self.output_dir, self.file_prefix + "_fasta.tsv")
-        fasta_df.to_csv(fasta_out, sep="\t", index=False)
+        fasta_df.to_csv(fasta_out, sep="\t",
+                        index=False,
+                        quoting = csv.QUOTE_NONE,
+                        escapechar = ' ')
 
         molecule_out = os.path.join(self.output_dir, self.file_prefix + "_molecules.tsv")
-        molecule_df.to_csv(molecule_out, sep="\t", index=False)
+        molecule_df.to_csv(molecule_out, index=False, sep="\t")
 
         print("Fasta dataframe saved as: {}\n".format(fasta_out))
         print("Molecule sequences saved as: {}\n".format(molecule_out))

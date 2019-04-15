@@ -67,7 +67,7 @@ class Sequencer():
         base_df = base_df.fillna(0.0)
 
         # pull out nuc with max count
-        base_df["nuc"] = base_df.idxmax(axis=1)
+        base_df["nuc"] = base_df[["A", "T", "G", "C", "-"]].idxmax(axis=1)
 
         # add regional info
         base_df["region"] = grp.region.unique()[0]

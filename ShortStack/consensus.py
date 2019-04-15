@@ -16,6 +16,7 @@ from Bio import pairwise2
 import time, psutil, os, shutil
 from dask.distributed import Client
 import dask.dataframe as dd
+from dask import delayed
 
 dask.config.set(scheduler='tasks')
 
@@ -30,17 +31,17 @@ class Consensus():
                  config_path,
                  molecules,
                  fasta_df,
-                 out_dir=os.path.curdir,
-                 log_path = "./",):
+                 out_dir,
+                 output_prefix,
+                 log_path):
 
         self.mem_limit = psutil.virtual_memory().available - 1000
         self.cpus = int(psutil.cpu_count())
         self.molecules = molecules
-        self.fasta = dd.read_parquet(fasta_df, engine='fastparquet')
-        raise SystemExit(self.fasta)
-        self.fasta.columns = ['ref_seq', 'id', 'chrom', 'start', 'stop', 'build', 'strand', 'region']
+        self.output_prefix = output_prefix
+        self.fasta = pd.read_csv(fasta_df, sep="\t")
         self.out_dir = out_dir
-        self.client = Client(name="HexSembler",
+        self.client = Client(name="HexSemblerConsensus",
                              memory_limit=self.mem_limit,
                              n_workers=self.cpus - 2,
                              threads_per_worker=self.cpus / 2,
@@ -58,7 +59,7 @@ class Consensus():
 
         ### Setup logging ###
         now = time.strftime("%Y%d%m_%H:%M:%S")
-        today_file = "{}_HexSembler_consensus.log".format(self.today)
+        today_file = "{}_{}_consensus.log".format(self.output_prefix, self.today)
         log_file = os.path.join(self.log_path, today_file)
         FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
         logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
@@ -77,64 +78,83 @@ class Consensus():
         self.log.addHandler(size_handler)
         self.log.addHandler(time_handler)
 
-        @staticmethod
-        def create_outdir(output_dir):
-            '''
-            Check if a directory exists, and if not, create it
-            :param output_dir: path to directory
-            :return: directory created
-            '''
-            try:
-                if not os.path.exists(output_dir):
-                    os.makedirs(output_dir)
-            except AssertionError as e:
-                error_message = "Unable to create output dir at: {}".format(output_dir, e)
-                self.log.error(error_message)
-                raise SystemExit(error_msg)
+    def create_outdir(self, output_dir):
+        '''
+        Check if a directory exists, and if not, create it
+        :param output_dir: path to directory
+        :return: directory created
+        '''
+        try:
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+        except AssertionError as e:
+            error_message = "Unable to create output dir at: {}".format(output_dir, e)
+            self.log.error(error_message)
+            raise SystemExit(error_message)
 
-        @jit(parallel=True)
-        def file_check(self, input_file):
-            '''
-            Purpose: check that input file paths exist and are not empty
-            input: file path
-            output: assertion error if file not found or is empty
-            '''
-            error_message = "Check that {} exists and is not empty.".format(input_file)
-            input_file = os.path.abspath(input_file)
-            assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
+    @jit(parallel=True)
+    def file_check(self, input_file):
+        '''
+        Purpose: check that input file paths exist and are not empty
+        input: file path
+        output: assertion error if file not found or is empty
+        '''
+        error_message = "Check that {} exists and is not empty.".format(input_file)
+        input_file = os.path.abspath(input_file)
+        assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
 
-        @jit(parallel=True)
-        def update_weight_for_row(self, row, graph):
-            # enumerate targets to break hexamers into bases
-            for pos, letter in enumerate(row.alignment):
-                base_pos = row.start + pos
-                graph[base_pos][letter] += 1  # for each nuc seen, weight of 1
+    @jit(parallel=True)
+    def get_molecules(self, mol_dir):
+        mol_list = []
+        for p, d, f in os.walk(mol_dir):
+            for file in f:
+                if file.endswith('_molecules.tsv'):
+                    mol_list.append(os.path.join(p, file))
+        return mol_list
+
+    @jit(parallel=True)
+    def update_weight_for_row(self, row, graph):
+        # enumerate targets to break hexamers into bases
+        for pos, letter in enumerate(row.alignment):
+            base_pos = row.start + pos
+            graph[base_pos][letter] += 1  # for each nuc seen, weight of 1
 
     @jit(parallel=True)
     def get_path(self, grp):
+
+        # pull out starting position for region
+        start_pos = grp.start.unique()[0]
+
         # setup dictionary by position
         graph = defaultdict(Counter)
 
         # update weights for each position observed
         grp.apply(self.update_weight_for_row, graph=graph,
                   axis=1)
-        #
+
         # coerce results to dataframe
         base_df = pd.DataFrame.from_dict(graph, orient='index')
-        base_df["-"] = 0.0
-        base_df = base_df.fillna(0)
+        base_df["pos"] = base_df.index.astype(int) + start_pos
+
+        # cover any bases not found
+        col_list = ["A", "T", "G", "C", "-"]
+        for col in col_list:
+            if col not in base_df:
+                base_df[col] = 0.0
 
         # get nucleotide with highest count
-        base_df["nuc"] = base_df.idxmax(axis=1)
+        base_df["nuc"] = base_df[["A", "T", "G", "C", "-"]].idxmax(axis=1)
 
         # calc number of features with ftm call to region
         base_df["sample_size"] = len(grp)
+        base_df = base_df.fillna(0)
+
 
         # convert counts to allele frequencies
-        base_df["A"] = round(base_df.A / base_df.sample_size * 100, 2)
-        base_df["T"] = round(base_df.T / base_df.sample_size * 100, 2)
-        base_df["G"] = round(base_df.G / base_df.sample_size * 100, 2)
-        base_df["C"] = round(base_df.C / base_df.sample_size * 100, 2)
+        base_df["A"] = round((base_df["A"] / base_df.sample_size) * 100, 2)
+        base_df["T"] = round((base_df["T"] / base_df.sample_size) * 100, 2)
+        base_df["G"] = round(base_df["G"] / base_df.sample_size * 100, 2)
+        base_df["C"] = round(base_df["C"] / base_df.sample_size * 100, 2)
 
         return base_df
 
@@ -151,7 +171,7 @@ class Consensus():
         # append the sequence to seq_list
         seq_tup = (grp.region.unique()[0], molecule_seq)
         seq_list.append(seq_tup)
-        #
+
         return seq_list
 
     @jit(parallel=True)
@@ -178,10 +198,16 @@ class Consensus():
 
     @jit(parallel=True)
     def main(self):
+
+        # read in molecule alignments
+        print("Aggregating molecule files...\n")
+        mol_file_list= self.get_molecules(self.molecules)
+        mol_df = dd.read_csv(mol_file_list, sep="\t").compute(ncores=self.cpus)
+
         print("Counting reads per base...\n")
         # split reads up by base
-        base_df = self.molecules.groupby(["region"]).apply(self.get_path).reset_index(drop=False)
-        base_df.columns = ["region", "pos", "G", "C", "A", "T", "-", "nuc", "sample_size", "nuc_freq"]
+        base_df = mol_df.groupby(["region"]).apply(self.get_path).reset_index(drop=False)
+        base_df = base_df[["region", "pos", "A", "T", "G", "C", "-", "nuc", "sample_size"]]
 
         print("Determining consensus sequence...\n")
         seq_list = base_df.groupby("region").apply(self.join_seq)
@@ -207,26 +233,16 @@ class Consensus():
                                                                                  index=alignments.index).reset_index(
             drop=True)
         alignments = alignments.drop("align_list", axis=1)
+        alignment_out = os.path.join(self.output_dir,
+                        self.output_prefix + "_" + self.today + "_consensus.tsv")
+        alignments.to_csv(alignment_out, sep="\t", index=False)
 
-        # delete after demo
-        print(base_df.head())
-        print(alignments)
-
-        # close dask tasks
-        self.client.close()
-
-        # cleanup temp files and directories
-        dask_folder = os.path.join(os.path.curdir, "dask-worker-space")
-        shutil.rmtree(dask_folder)
-
-        print("ShortStack pipeline complete.")
+        print("Consensus alignments saved to:\n {}\n".format(alignment_out))
 
         # close dask tasks
         self.client.close()
 
-        # cleanup temp files and directories
-        dask_folder = os.path.join(os.path.curdir, "dask-worker-space")
-        shutil.rmtree(dask_folder)
+        print("Consensus sequencing complete.")
 
 
 if __name__ == "__main__":
@@ -238,191 +254,10 @@ if __name__ == "__main__":
 
     # instantiate sequencing module from sequencer.py
     consensus = Consensus(config_path=args.config,
-                               molecules=config.get("options", "molecule_path"),
-                               fasta_df=config.get("options", "fasta_path"),
+                               molecules=config.get("options", "molecule_files"),
+                               fasta_df=config.get("options", "fasta_dataframe"),
                                out_dir=config.get("options", "output_dir"),
+                               output_prefix=config.get("options", "output_prefix"),
                                log_path=config.get("options", "log_path"))
 
     consensus.main()
-
-# import sys, re, swifter, psutil, os
-# import warnings
-# from dask.dataframe.methods import sample
-# from Bio.Nexus.Trees import consensus
-# if not sys.warnoptions:
-#     warnings.simplefilter("ignore")
-# import logging
-# import cython_funcs as cpy
-# from numba import jit
-# import numpy as np
-# import pandas as pd
-# from collections import defaultdict, Counter
-# import dask.dataframe as dd
-# from dask.dataframe.io.tests.test_parquet import npartitions
-#
-# # import logger
-# log = logging.getLogger(__name__)
-#
-# class Consensus():
-#
-#     def __init__(self,
-#                  molecule_df,
-#                  ref_df,
-#                  out_dir,
-#                  cpus,
-#                  client,
-#                  today):
-#
-#         self.molecule_df = molecule_df
-#         self.ref_df = ref_df
-#         self.output_dir = out_dir
-#         self.cpus = cpus
-#         self.client = client
-#         self.today = today
-#
-#     @jit(parallel=True)
-#     def weigh_molecules(self, molecule_df):
-#         '''
-#         purpose: sum weights for each base/position
-#         input: molecule_df created as output of sequenceer.py
-#         output: molecule_df grouped by region with a sum of weights at eaach pos
-#         '''
-#
-#         # calculate sample size for each region
-#         size_df = dd.from_pandas(molecule_df[["FeatureID", "region"]].drop_duplicates(),
-#                                  npartitions=self.cpus)
-#         sample_sizes = size_df.groupby('region')['FeatureID'].count().reset_index()
-#         sample_sizes.columns = ["region", "sample_size"]
-#
-#         # if molecule weight < 1 then set base to N
-#         molecule_df["base"][molecule_df.weight == np.nan] = "N"
-#         molecule_df["base"][molecule_df.weight < 1] = "N"
-#
-#         # set all molecule weights to N
-#         molecule_df["weight"] = 1
-#
-#         # group by region and sum weights
-#         molecule_df["base_weight"] = molecule_df.groupby(["region", "pos", "base"])["weight"].transform('sum')
-#         molecule_df = molecule_df.drop(["weight", "FeatureID"],  axis=1)
-#
-#         # divide count by sample size to get frequency
-#         molecule_df = dd.merge(molecule_df, sample_sizes,
-#                                         on="region",
-#                                         how="left")
-#
-#         return molecule_df
-#
-#     @jit(parallel=True)
-#     def parse_consensus(self, molecule_df):
-#         '''
-#         purpose: convert format to one row per position for each molecule
-#         input: molecule_df
-#         output: final consensus output to output_dir/consensus_counts.tsv
-#         '''
-#
-#         molecule_df = self.client.compute(molecule_df)
-#         molecule_df = self.client.gather(molecule_df)
-#
-#         consensus_df = pd.pivot_table(molecule_df,
-#                                       values = ['base_weight'],
-#                                       index=['region','chrom',
-#                                              'pos', 'ref_base',
-#                                              'sample_size'],
-#                                       columns='base',
-#                                       fill_value=0).reset_index()
-#
-#         # sort and parse columns
-#         consensus_df.columns = consensus_df.columns.droplevel(1)
-#         consensus_df.columns = ["region", "chrom", "pos", "ref_base", "sample_size", "A", "C", "G", "N", "T"]
-#         consensus_df = consensus_df[["region", "chrom", "pos", "ref_base", "A", "T", "G", "C", "N", "sample_size"]]
-#         consensus_df = consensus_df.sort_values(by=["region", "pos"])
-#
-#         # find most frequent allele for each position
-#         consensus_df["max_nuc"] = consensus_df[["A", "T", "G", "C", "N"]].idxmax(axis=1)
-#
-#         # save to a file
-#         out_file = os.path.join(self.output_dir, "consensus_counts.tsv")
-#         consensus_df.to_csv(out_file, sep="\t", index=False)
-#
-#         return consensus_df
-#
-#     @jit(parallel=True)
-#     def find_MAF(self, consensus_df):
-#
-#         # find rows where the max_nuc does not equal ref_base
-#         mafs = consensus_df[consensus_df.ref_base != consensus_df.max_nuc]
-#
-#         # calc row total calls
-#         mafs["DP"] = mafs[["A", "T", "G", "C", "N"]].sum(axis=1)
-#
-#         # add placeholder for QV and NL values
-#         mafs["QV"] = 30
-#         mafs["NL"] = 5
-#
-#         # add (num_ref calls, num_alt calls)
-#         mafs["AD"] =  tuple(zip(mafs.lookup(mafs.index,mafs.ref_base),
-#                                 mafs.lookup(mafs.index,mafs.max_nuc)))
-#
-#         # calculate variant allele freq
-#         mafs["VF"] = round(((mafs.lookup(mafs.index,mafs.max_nuc)/mafs["sample_size"]) * 100),2)
-#
-#         # add alt nuc
-#         mafs["ALT"] = mafs["max_nuc"]
-#         mafs["REF"] = mafs["ref_base"]
-#         mafs["QUAL"]= "."
-#         mafs["FILTER"] = "."
-#
-#         # parse into vcf format
-#         mafs["INFO"] = "AD=" + mafs.AD.astype(str) + ";" + \
-#                        "DP=" + mafs.DP.astype(str) + ";" + \
-#                        "QV=" + mafs.QV.astype(str) + ";" + \
-#                        "NL=" + mafs.NL.astype(str) + ";" + \
-#                        "VF=" + mafs.VF.astype(str)
-#
-#         # remove unnecessary columns
-#         mafs = mafs.drop(["DP", "NL", "AD", "VF", "QV",
-#                           "A", "T", "G", "C", "N",
-#                           "max_nuc", "ref_base"], axis=1)
-#
-#         # reorder columns
-#         mafs  = mafs[["chrom", "pos", "REF", "ALT", "QUAL", "FILTER", "INFO"]]
-#
-#         return mafs
-#
-#     def make_vcf(self, maf_df):
-#
-#         # write VCF header to file
-#         today_file = "{}_ShortStack.vcf".format(self.today)
-#         output_VCF = os.path.join(self.output_dir, today_file)
-#         with open(output_VCF, 'w') as vcf:
-#             vcf.write("##fileformat=VCFv4.2\n")
-#             vcf.write("##source=ShortStackv0.1.1\n")
-#             vcf.write("##reference=GRCh38\n")
-#             vcf.write("##referenceMod=file://data/scratch/reference/reference.bin\n")
-#             vcf.write("##fileDate:{}\n".format(self.today))
-#             vcf.write("##comment='Unreleased dev version. See Summer or Nicole with questions.'\n")
-#             vcf.write("##FILTER=<ID=Pass,Description='All filters passed'>\n")
-#             vcf.write("##INFO=<ID=GENE, Number=1, Type=String, Description='Gene name'>\n")
-#             vcf.write("#CHROM    POS    ID    REF    ALT    QUAL    FILTER    INFO\n")
-#
-#         # parse dataframe for vcf output
-#         maf_df.to_csv(output_VCF, index=False, sep="\t", header=False, mode='a')
-#
-#
-#
-#     def main(self):
-#
-#         # set all molecule weights to 1 and sum
-#         consensus_weights = self.weigh_molecules(self.molecule_df)
-#
-#         # parse results and save to file
-#         consensus_df = self.parse_consensus(consensus_weights)
-#
-#         # find rows where the major allele varies from the ref allele
-#         maf_df = self.find_MAF(consensus_df)
-#
-#         self.make_vcf(maf_df)
-#
-#
-
-
