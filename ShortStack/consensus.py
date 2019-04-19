@@ -13,10 +13,10 @@ from numba import jit
 import pandas as pd
 from collections import defaultdict, Counter
 from Bio import pairwise2
-import time, psutil, os, shutil
+import time, psutil, os
 from dask.distributed import Client
 import dask.dataframe as dd
-from dask import delayed
+from pandas.io.json import json_normalize
 
 dask.config.set(scheduler='tasks')
 
@@ -36,19 +36,18 @@ class Consensus():
                  log_path):
 
         self.mem_limit = psutil.virtual_memory().available - 1000
+        self.config_path  = config_path
         self.cpus = int(psutil.cpu_count())
         self.molecules = molecules
-        self.output_prefix = output_prefix
+        self.today = time.strftime("%Y%m%d")
+        self.output_prefix = str(self.today) + "_" + output_prefix
+        self.out_dir = os.path.join(out_dir, self.output_prefix + "_consensus")
         self.fasta = pd.read_csv(fasta_df, sep="\t")
-        self.out_dir = out_dir
         self.client = Client(name="HexSemblerConsensus",
                              memory_limit=self.mem_limit,
                              n_workers=self.cpus - 2,
                              threads_per_worker=self.cpus / 2,
                              processes=True)
-
-        # gather run options
-        self.today = time.strftime("%Y%m%d")
 
         # set directory path
         self.log_path = os.path.abspath(log_path)
@@ -59,7 +58,7 @@ class Consensus():
 
         ### Setup logging ###
         now = time.strftime("%Y%d%m_%H:%M:%S")
-        today_file = "{}_{}_consensus.log".format(self.output_prefix, self.today)
+        today_file = "{}_consensus.log".format(self.output_prefix)
         log_file = os.path.join(self.log_path, today_file)
         FORMAT = '{"@t":%(asctime)s, "@l":%(levelname)s, "@ln":%(lineno)s, "@f":%(funcName)s}, "@mt":%(message)s'
         logging.basicConfig(filename=log_file, level=logging.DEBUG, filemode='w',
@@ -175,26 +174,123 @@ class Consensus():
         return seq_list
 
     @jit(parallel=True)
-
-
     def align_seqs(self, x):
-        # parameters may need to be experimentally adjusted
-        query = x.consensus_seq
-        target = x.ref_seq
 
         # create pairwise global alignment object
-        alignments = pairwise2.align.globalms(target,
-                                              query,
+        alignments = pairwise2.align.globalms(x.ref_seq,
+                                              x.consensus_seq,
                                               1, 0, -3, -.1,  # recommended penalties to favor snv over indel
                                               one_alignment_only=True)  # returns only best score
 
         # for each alignment in alignment object, return aligned sequence only
         for a in alignments:
-            query, alignment, score, start, align_len = a
+            target, alignment, score, start, align_len = a
             pct_sim = round(score / align_len * 100, 2)
 
-            return [x.region, alignment, x.ref_seq, pct_sim]
+            return [x.chrom, x.region, alignment, x.ref_seq, pct_sim]
 
+    @jit(parallel=True)
+    def find_variants(self, row):
+        # create dictionary of variants for each position
+        var_graph = defaultdict(defaultdict)
+        if row.pct_sim != 100:
+            for idx, (alt, ref) in enumerate(zip(row.alignment, row.ref_seq)):
+                if alt != ref:
+                    var_graph[row.chrome+"$"+row.region][idx] = {"ref":ref, "alt":alt}
+        return var_graph
+
+
+    def reshape_graph(self, graph):
+
+        # flatten dictionary levels to create dataframe
+        reform = {(level1_key, level2_key): values
+            for level1_key, level2_dict in graph.items()
+            for level2_key, values in level2_dict.items()}
+
+        result = []
+        for k, v in reform.items():
+            for x,y in v.items():
+                result.append((k[1], x,y))
+
+        df = pd.DataFrame(result)
+        df.columns = ["region", "pos", "vars"]
+
+        return df
+
+    def reshape_df(self, df):
+
+        # flatten dictionary into columns for ref and alt, one per row
+        df = pd.concat([df, json_normalize(df["vars"])], axis=1)
+        df = df.drop("vars", axis=1)
+        df[["chrom", "region"]] = df['region'].str.split('$',expand=True)
+        df = df.sort_values(["region", "pos"])
+
+        # group together indels by consecutive position within region
+        s = df.groupby('region').pos.apply(lambda x: x.diff().fillna(1).ne(1).cumsum())
+        var_list = []
+        for idx, group in df.groupby(['region', s], sort=False):
+            chrom = group.chrom.unique()[0]
+            start_pos = min(group.pos)
+            region = idx[0]
+            ref = ''.join(group.ref.to_list())
+            alt = ''.join(group.alt.to_list())
+            var_list.append([chrom, start_pos, region, ref, alt])
+
+        var_df = pd.DataFrame(var_list)
+        var_df.columns = ["#CHROM", "POS", "ID", "REF", "ALT"]
+        # add placeholder for future metrics
+        var_df["QUAL"] = 7  # placeholder for real quality score
+        var_df["FILTER"] = "."
+        var_df["QV"] = 30
+
+        return var_df
+
+    @jit(parallel=True)
+    def make_vcf(self, var_df, base_df):
+
+        # pull in count information
+        vcf_df = var_df.merge(base_df,
+                              left_on=['ID', 'POS'],
+                              right_on=['region', 'pos'],
+                              how='left')
+
+        # parse into vcf format
+        vcf_df["INFO"] = "DP=" + vcf_df.DP.astype(str) + ";" + \
+                       "QV=" + vcf_df.QV.astype(str) + ";" + \
+                       "VF=" + vcf_df.VF.astype(str)
+
+        # remove unnecessary columns
+        vcf_df = vcf_df.drop(["DP", "VF", "QV",
+                          "A", "T", "G", "C", "-",
+                        'region', 'pos', 'nuc', 'sample_size'], axis=1)
+
+        return vcf_df
+
+    def write_vcf(self, vcf_df):
+
+        vcf_file = os.path.join(self.out_dir, self.output_prefix + ".vcf")
+
+        # delete file if file exists
+        if os.path.exists(vcf_file):
+            os.remove(vcf_file)
+
+        with open(vcf_file, 'a+') as vcf:
+            vcf.write("##fileformat=VCFv4.2\n")
+            vcf.write("##source=ShortStackv0.1.1\n")
+            vcf.write("##reference=GRCh38\n")
+            vcf.write("##referenceMod=file://data/scratch/reference/reference.bin\n")
+            vcf.write("##fileDate:{}\n".format(self.today))
+            vcf.write("##comment='Unreleased dev version. See Summer or Nicole with questions.'\n")
+            vcf.write("##INFO=<ID=DP,Number=1,Type=Integer,Description='Total Depth'>\n")
+            vcf.write("##INFO=<ID=QV,Number=1,Type=Integer,Description='Quality Value'>\n")
+            vcf.write("##INFO=<ID=VF,Number=1,Type=Integer,Description='Variant Frequency'>\n")
+            vcf.write("##FILTER=<ID=Pass,Description='All filters passed'>\n")
+            vcf.write("##INFO=<ID=GENE, Number=1, Type=String, Description='Gene name'>\n")
+            vcf.write("#CHROM    POS    ID    REF    ALT    QUAL    FILTER    INFO\n")
+
+        vcf_df.to_csv(vcf_file, index=False, sep="\t", header=False, mode='a')
+
+        print("VCF saved as {}".format(vcf_file))
 
     @jit(parallel=True)
     def main(self):
@@ -208,6 +304,15 @@ class Consensus():
         # split reads up by base
         base_df = mol_df.groupby(["region"]).apply(self.get_path).reset_index(drop=False)
         base_df = base_df[["region", "pos", "A", "T", "G", "C", "-", "nuc", "sample_size"]]
+        # calculate depth at each base
+        base_df["DP"] = round(base_df[["A", "T", "G", "C", "-"]].sum(axis=1), 2)
+        # calculate allele freq
+        base_df["VF"] = round(((base_df.lookup(base_df.index, base_df.nuc) / base_df["DP"]) * 100), 2)
+
+        # write base call counts to file
+        base_file = os.path.join(self.out_dir, self.output_prefix + "_counts.tsv")
+        base_df.to_csv(base_file, sep="\t", index=False)
+        print("Base counts saved to {}".format(base_file))
 
         print("Determining consensus sequence...\n")
         seq_list = base_df.groupby("region").apply(self.join_seq)
@@ -217,7 +322,7 @@ class Consensus():
         seq_df.columns = ["region", "consensus_seq"]
 
         print("Adding reference sequences to align...\n")
-        ## add reference sequence for each feature
+        # add reference sequence for each feature
         seq_df = seq_df.merge(self.fasta,
                               on=["region"],
                               how='left')
@@ -229,15 +334,20 @@ class Consensus():
         print("Aligning consensus sequences...\n")
         alignments = pd.DataFrame(seq_df.apply(self.align_seqs, axis=1))
         alignments.columns = ["align_list"]
-        alignments[['region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(alignments.align_list.values.tolist(),
-                                                                                 index=alignments.index).reset_index(
-            drop=True)
+        alignments[['chrome', 'region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(alignments.align_list.values.tolist(),
+                            index=alignments.index).reset_index(drop=True)
         alignments = alignments.drop("align_list", axis=1)
         alignment_out = os.path.join(self.output_dir,
                         self.output_prefix + "_" + self.today + "_consensus.tsv")
         alignments.to_csv(alignment_out, sep="\t", index=False)
-
         print("Consensus alignments saved to:\n {}\n".format(alignment_out))
+
+        print("Generating VCF file...\n")
+        var_grpah = alignments.apply(self.find_variants, axis=1)
+        var_df1 = self.reshape_graph(var_grpah)
+        var_df = self.reshape_df(var_df1)
+        vcf_df = self.make_vcf(var_df, base_df)
+        self.write_vcf(vcf_df)
 
         # close dask tasks
         self.client.close()
