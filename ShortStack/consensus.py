@@ -281,6 +281,7 @@ class Consensus():
             vcf.write("##referenceMod=file://data/scratch/reference/reference.bin\n")
             vcf.write("##fileDate:{}\n".format(self.today))
             vcf.write("##comment='Unreleased dev version. See Summer or Nicole with questions.'\n")
+            vcf.write("##comment='Command line arg: python3 consensus.py -c path/to/consenus_config.txt.'\n")
             vcf.write("##INFO=<ID=DP,Number=1,Type=Integer,Description='Total Depth'>\n")
             vcf.write("##INFO=<ID=QV,Number=1,Type=Integer,Description='Quality Value'>\n")
             vcf.write("##INFO=<ID=VF,Number=1,Type=Integer,Description='Variant Frequency'>\n")
