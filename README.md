@@ -116,6 +116,14 @@ The final step requires you to create another config file with paths to the fold
 - output_dir= path to directory where you would like to place the output files
 - log_path=path to your log file to document program events
 
+To change the alignment parameters, follow the guidlines [here](https://biopython.org/DIST/docs/api/Bio.pairwise2-module.html) and update the consensus_config.txt "align" section as shown below: 
+[align]
+- align_type=local  
+- match_points=1  
+- mismatch_penalty=-1  
+- gap_open_penalty=-2  
+- gap_extend_penalty=0  
+
 #### Output = 
 - counts.tsv: per base allele frequencies per ROI 
 - .vcf: variant calls
