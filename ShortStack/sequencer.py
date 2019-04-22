@@ -24,7 +24,8 @@ class Sequencer():
                  out_dir,
                  prefix,
                  cpus,
-                 client):
+                 client,
+                 align_params):
         
         self.cpus = cpus
         self.counts = counts[["FeatureID", "region", "pos", "Target", "bc_count"]].compute(ncores=self.cpus)
@@ -35,6 +36,7 @@ class Sequencer():
         self.output_dir = out_dir
         self.prefix = prefix
         self.client = client
+        self.align_params = align_params
     
     @jit(parallel=True)   
     def update_weight_for_row(self, row, graph):
@@ -97,13 +99,18 @@ class Sequencer():
         # parameters may need to be experimentally adjusted
         query = x.feature_seq
         target = x.ref_seq
-        
-        # create pairwise global alignment object
-        alignments = pairwise2.align.globalms(target,
-                        query,
-                        1, 0, -3, -.1, # recommended penalties to favor snv over indel
-                        one_alignment_only=True) # returns only best score
-        
+
+        if self.align_params == "supervised":
+            alignments = pairwise2.align.localms(target,
+                                                  query,
+                                                  1, 0, -3, -.1,  # recommended penalties to favor snv over indel
+                                                  one_alignment_only=True)  # returns only best score
+        else:
+            alignments = pairwise2.align.localms(target,
+                                                  query,
+                                                  1, -1, -2, 0,  # recommended penalties to favor snv over indel
+                                                  one_alignment_only=True)  # returns only best score
+
         # for each alignment in alignment object, return aligned sequence only
         for a in alignments:
             query, alignment, score, start, align_len = a

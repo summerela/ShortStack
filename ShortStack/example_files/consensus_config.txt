@@ -7,3 +7,11 @@ fasta_dataframe=/home/selasady/ShortStack/ShortStack/feasibility/output/feasibil
 output_prefix=feasibility
 output_dir=./
 log_path=./
+
+# change from default only if necessary
+[alignment]
+align_type=local
+match_points=1
+mismatch_penalty=-1
+gap_open_penalty=-2
+gap_extend_penalty=0

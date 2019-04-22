@@ -33,7 +33,12 @@ class Consensus():
                  fasta_df,
                  out_dir,
                  output_prefix,
-                 log_path):
+                 log_path,
+                 align_type="local",
+                 match_points=1,
+                 mismatch_penalty=-1,
+                 gap_open_penalty=-2,
+                 gap_extend_penalty=0):
 
         self.mem_limit = psutil.virtual_memory().available - 1000
         self.config_path  = config_path
@@ -48,6 +53,11 @@ class Consensus():
                              n_workers=self.cpus - 2,
                              threads_per_worker=self.cpus / 2,
                              processes=True)
+        self.align_type = align_type
+        self.match_points = match_points
+        self.mismatch_penalty = mismatch_penalty
+        self.gap_open_penalty = gap_open_penalty
+        self.gap_extend_penalty = gap_extend_penalty
 
         # set directory path
         self.log_path = os.path.abspath(log_path)
@@ -176,11 +186,26 @@ class Consensus():
     @jit(parallel=True)
     def align_seqs(self, x):
 
-        # create pairwise global alignment object
-        alignments = pairwise2.align.globalms(x.ref_seq,
-                                              x.consensus_seq,
-                                              1, 0, -3, -.1,  # recommended penalties to favor snv over indel
-                                              one_alignment_only=True)  # returns only best score
+        if self.align_type == "local":
+
+            # create pairwise global alignment object
+            alignments = pairwise2.align.localms(x.ref_seq,
+                                                  x.consensus_seq,
+                                                  self.match_points,
+                                                  self.mismatch_penalty,
+                                                  self.gap_open_penalty,
+                                                  self.gap_extend_penalty,  # recommended penalties to favor snv over indel
+                                                  one_alignment_only=True)  # returns only best score
+
+        else:
+            # create pairwise global alignment object
+            alignments = pairwise2.align.globalms(x.ref_seq,
+                                                 x.consensus_seq,
+                                                 self.match_points,
+                                                 self.mismatch_penalty,
+                                                 self.gap_open_penalty,
+                                                 self.gap_extend_penalty,  # recommended penalties to favor snv over indel
+                                                 one_alignment_only=True)  # returns only best score
 
         # for each alignment in alignment object, return aligned sequence only
         for a in alignments:
@@ -371,6 +396,11 @@ if __name__ == "__main__":
                                fasta_df=config.get("options", "fasta_dataframe"),
                                out_dir=config.get("options", "output_dir"),
                                output_prefix=config.get("options", "output_prefix"),
-                               log_path=config.get("options", "log_path"))
+                               log_path=config.get("options", "log_path"),
+                               align_type=config.get("alignment", "align_type"),
+                               match_points=config.getint("alignment", "match_points"),
+                               mismatch_penalty=config.getint("alignment", "mismatch_penalty"),
+                               gap_open_penalty=config.getint("alignment", "gap_open_penalty"),
+                               gap_extend_penalty=config.getint("alignment", "gap_extend_penalty"))
 
     consensus.main()

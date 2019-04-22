@@ -125,8 +125,10 @@ class ShortStack():
         if self.mutation_vcf.lower() != "none":
             self.mutation_vcf = os.path.abspath(mutation_vcf)
             self.file_check(self.mutation_vcf)
+            self.align_params = "supervised"
         else:
             self.mutation_vcf = "none"
+            self.align_params = "unsupervised"
 
         ### Setup logging ###
         now = time.strftime("%Y%d%m_%H:%M:%S")
@@ -389,7 +391,8 @@ class ShortStack():
                                  self.output_dir,
                                  self.file_prefix,
                                  self.cpus,
-                                 self.client)
+                                 self.client,
+                                 self.align_params)
 
         molecule_df = sequence.main()
 
