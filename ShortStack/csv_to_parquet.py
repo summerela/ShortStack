@@ -82,6 +82,19 @@ def parse_s6(input_s6):
     s6_df = s6_df[s6_df.BC != 0]
     s6_df = s6_df[s6_df.BC > 111111]
 
+    # save invalid barcodes
+    invalids = s6_df[(s6_df.BC == 0) | (s6_df.BC <= 111111)]
+    if len(invalids) > 1:
+        print("Saving invalid barcodes to parquet.")
+        invalid_out = os.path.join(outdir, file_prefix + "_" + str(today) + "_invalids")
+        invalids.to_parquet(invalid_out,
+                         append=False,
+                         engine='fastparquet',
+                         compression='snappy')
+    else:
+        print("No invalid barcodes filtered.")
+
+
     s6_df['BC'] = s6_df['BC'].astype('str')
 
     # filter out rows where basecall contains uncalled bases of 0
