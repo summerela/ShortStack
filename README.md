@@ -83,7 +83,7 @@ Fill out the following options in the [user_facing_options] section:
 - encoding_table= path to the encoding file that maps your targets to nucleotides
 - mutation_vcf= enter path to a VCF file for supervised sequencing, or enter None for unsupervised
 - ftm_only= set to True if you only want to run FTM
-- log_path=path to your log file to document program events
+- logfile_path=path to your log file to document program events
 
 #### output = config file 
 
