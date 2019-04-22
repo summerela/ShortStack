@@ -191,12 +191,14 @@ class Consensus():
 
     @jit(parallel=True)
     def find_variants(self, row):
+
         # create dictionary of variants for each position
         var_graph = defaultdict(defaultdict)
         if row.pct_sim != 100:
             for idx, (alt, ref) in enumerate(zip(row.alignment, row.ref_seq)):
                 if alt != ref:
-                    var_graph[row.chrome+"$"+row.region][idx] = {"ref":ref, "alt":alt}
+                    var_graph[str(row.chrome)+"$"+str(row.region)][idx] = {"ref":ref, "alt":alt}
+
         return var_graph
 
 
@@ -344,8 +346,8 @@ class Consensus():
         print("Consensus alignments saved to:\n {}\n".format(alignment_out))
 
         print("Generating VCF file...\n")
-        var_grpah = alignments.apply(self.find_variants, axis=1)
-        var_df1 = self.reshape_graph(var_grpah)
+        var_graph = alignments.apply(self.find_variants, axis=1)
+        var_df1 = self.reshape_graph(var_graph)
         var_df = self.reshape_df(var_df1)
         vcf_df = self.make_vcf(var_df, base_df)
         self.write_vcf(vcf_df)
