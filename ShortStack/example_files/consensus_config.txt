@@ -2,11 +2,11 @@
 # do not use quotes around strings
 
 [options]
-molecule_files=/home/selasady/ShortStack/ShortStack/feasibility/output
-fasta_dataframe=/home/selasady/ShortStack/ShortStack/feasibility/output/feasibility_20190414_fasta.tsv
-output_prefix=feasibility
-output_dir=./
-log_path=./
+molecule_files=./example_files/molecules/output/
+fasta_dataframe=./example_files/molecules/output/krasNras_20190424/krasNras_20190424_fasta.tsv
+output_prefix=krasNras
+output_dir=./example_files/example_output
+log_path=./example_files/
 
 # change from default only if necessary
 [alignment]

@@ -63,10 +63,7 @@ class Encode_files():
         # check for and store info on base calls not valid in encoding file
         parity_df = encoded_df[encoded_df['Target'].isnull()]
         parity_df = parity_df.drop(["Target", "bc_length"], axis=1)
-            
-        parity_df.to_parquet(self.invalids_file, 
-                             append=False,
-                             engine='fastparquet')
+        parity_df["invalid_reason"] = "unmapped"
          
         return encoded_df, parity_df
     
@@ -88,7 +85,12 @@ class Encode_files():
         return encoded_df
     
     @jit(parallel=True)
-    def main(self, s6_df, encoded_df):
+    def main(self):
         mapped_df, parity_df = self.map_basecalls(self.s6_df, self.encoding_df)
         enocoded_df = self.remove_invalidBC(mapped_df)
+
+        parity_df.to_parquet(self.invalids_file,
+                             append=False,
+                             engine='fastparquet')
+
         return enocoded_df, parity_df

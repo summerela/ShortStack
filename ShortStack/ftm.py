@@ -15,6 +15,8 @@ from numba import jit
 import pandas as pd
 import dask.dataframe as dd
 pd.options.mode.chained_assignment = None
+import functools
+import operator
 
 # import logger
 log = logging.getLogger(__name__)
@@ -143,8 +145,6 @@ class FTM():
         if len(hamming_list) < 1:
             raise SystemExit("No calls below hamming distance threshold.")
         else:
-            import functools
-            import operator
 
             # flatten list of lists in case of more than one kmer length
             hams = functools.reduce(operator.iconcat, hamming_list, [])
@@ -198,7 +198,7 @@ class FTM():
                                  "chrom", "pos", "Target", 
                                  "BC", "cycle", "pool", "hamming"]]
         
-        # save raw hamming counts to file and remove from memory
+        # save raw hamming counts to file
         outfile = os.path.join(self.output_dir, self.file_prefix + "_rawCounts")
         if os.path.exists(outfile):
             shutil.rmtree(outfile, ignore_errors=True)
@@ -250,10 +250,15 @@ class FTM():
         
         # filter out features below diversity threshold
         diversified = input_df[input_df.feature_div >= diversity_threshold]
+        undiversified = input_df[input_df.feature_div < diversity_threshold]
+
+        if len(undiversified)> 1:
+            undiversified = undiversified[["FeatureID", "BC", "cycle", "pool"]]
+            undiversified["invalid_reason"] = "div_filter"
 
         # check that calls were found
         if len(diversified) > 1:
-            return diversified
+            return diversified, undiversified
         else:
             raise SystemExit("No calls pass diversity threshold.")
     
@@ -332,15 +337,21 @@ class FTM():
                                  npartitions=self.cpus)
         
         # keep only relevant columns and drop duplicated featureID/gene combos
-        regional_counts = bc_counts[["FeatureID", "region", "feature_div", "counts"]]
-        regional_counts = regional_counts.drop_duplicates(subset=["FeatureID", "region"])
+        regional_counts = bc_counts.drop_duplicates(subset=["FeatureID", "region"])
+
+        # store regions below covg threshold
+        below_covg = regional_counts[regional_counts.counts < self.coverage_threshold]
+        if len(below_covg) > 1:
+            below_covg = below_covg[["FeatureID", "BC", "cycle", "pool"]]
+            below_covg["invalid_reason"] = "covg_filter"
         
         # filter out featureID/gene combos below covg threshold
+        regional_counts = regional_counts[["FeatureID", "region", "feature_div", "counts"]]
         regional_counts = regional_counts[regional_counts.counts >= self.coverage_threshold]
         
         assert len(regional_counts) != 0, "No matches found above coverage threshold." 
         
-        return regional_counts
+        return regional_counts, below_covg
     
     def get_top2(self, regional_counts):
         print("Pulling out top two regions for each molecule.")
@@ -428,6 +439,8 @@ class FTM():
         # otherwise no call can be made
         else:
             pass
+
+        ### tie-breaking logic deprecated ###
         
         # # find second highest count
         # second_max = x.counts.min()
@@ -519,17 +532,10 @@ class FTM():
                   
         if len(no_calls) > 0:
            
-            # save no_call info to file
-            no_ftm_file = os.path.join(self.output_dir, self.file_prefix + "_no_ftm_calls")
-            if os.path.exists(no_ftm_file):
-                shutil.rmtree(no_ftm_file, ignore_errors=True)
-            no_calls.to_parquet(no_ftm_file,
-                                append=False,
-                                engine='fastparquet')
-           
-        
+            no_calls = no_calls[["FeatureID", "BC", "cycle", "pool"]]
+            no_calls["invalid_reason"] = "no_ftm_call"
 
-        return all_calls
+        return all_calls, no_calls
     
     @jit(parallel=True)
     def filter_allCalls(self, all_calls):
@@ -579,7 +585,7 @@ class FTM():
         hd_plus, hd0 = self.parse_hd1(hamming_df)
         
         # filter for feature diversity
-        hd0_diversified = self.diversity_filter(hd0, self.diversity_threshold)
+        hd0_diversified, undiversified = self.diversity_filter(hd0, self.diversity_threshold)
              
         # normalize multi-mapped reads and count
         norm_counts = self.locate_multiMapped(hd0_diversified)
@@ -598,7 +604,7 @@ class FTM():
         bc_counts2 = bc_counts.drop(['pool', 'cycle', 'BC'],axis=1)  
            
         # sum counts for each region
-        region_counts = self.regional_counts(bc_counts)
+        region_counts, below_covg = self.regional_counts(bc_counts)
       
         # find top 2 scores for each bar code
         top2 = self.get_top2(region_counts)    
@@ -635,12 +641,27 @@ class FTM():
                               engine='fastparquet')
 
         # save no_calls to a file and add HD1+ back in for sequencing
-        all_calls = self.return_calls(ftm_counts, hamming_df)
+        all_calls, no_calls = self.return_calls(ftm_counts, hamming_df)
         
         # filter all counts 
         all_counts = self.filter_allCalls(all_calls)
+
+        # find invalid barcodes
+        invalid_dfs = [undiversified, below_covg, no_calls]
+        concat_list = []
+        for df in invalid_dfs:
+            if len(df) > 1:
+                concat_list.append(df)
+
+        # concatenate invalids
+        if len(concat_list) > 1:
+            invalid_df = dd.concat(concat_list)
+        elif len(concat_list) == 1:
+            invalid_df = concat_list[0]
+        else:
+            invalid_df = ""
         
-        return all_counts, hamming_df, ftm_counts
+        return all_counts, invalid_df
 
         
        
