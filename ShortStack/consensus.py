@@ -266,9 +266,9 @@ class Consensus():
         var_df = pd.DataFrame(var_list)
         var_df.columns = ["#CHROM", "POS", "ID", "REF", "ALT"]
         # add placeholder for future metrics
-        var_df["QUAL"] = 7  # placeholder for real quality score
+        var_df["QUAL"] = "."  # placeholder for real quality score
         var_df["FILTER"] = "."
-        var_df["QV"] = 30
+        var_df["QV"] = "."
 
         return var_df
 
@@ -307,7 +307,6 @@ class Consensus():
             vcf.write("##reference=GRCh38\n")
             vcf.write("##referenceMod=file://data/scratch/reference/reference.bin\n")
             vcf.write("##fileDate:{}\n".format(self.today))
-            vcf.write("##comment='Unreleased dev version. See Summer or Nicole with questions.'\n")
             vcf.write("##comment='Command line arg: python3 consensus.py -c path/to/consenus_config.txt.'\n")
             vcf.write("##INFO=<ID=DP,Number=1,Type=Integer,Description='Total Depth'>\n")
             vcf.write("##INFO=<ID=QV,Number=1,Type=Integer,Description='Quality Value'>\n")
