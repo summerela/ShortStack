@@ -211,6 +211,16 @@ class ShortStack():
         input_file = os.path.abspath(input_file)
         assert (os.path.isfile(input_file)) and (os.path.getsize(input_file) > 0), error_message
 
+    @jit(parallel=True)
+    def dir_check(self, input_dir):
+        '''
+        Purpose: check that input file paths exist and are not empty
+        input: file path
+        output: assertion error if file not found or is empty
+        '''
+        error_message = "Check that {} directory exists and is not empty.".format(input_dir)
+        assert os.path.isdir(input_dir), error_message
+
     def main(self):
         '''
         purpose: main function to run shortstack
@@ -224,6 +234,7 @@ class ShortStack():
         # check that file paths are valid
         self.file_check(self.encoding_file)
         self.file_check(self.target_fa)
+        self.dir_check(self.input_s6)
 
         #########################
         ####   Parse Input   ####
@@ -258,7 +269,7 @@ class ShortStack():
                                       self.client)
 
         # return dataframe of targets found for each molecule
-        encoded_df, parity_df = encode.main(encoding_df, s6_df)
+        encoded_df, parity_df = encode.main()
 
         # cleanup encoding_df
         del encoding_df
@@ -304,7 +315,7 @@ class ShortStack():
                           self.client
                           )
         # run FTM
-        all_counts, hamming_df, ftm_calls = run_ftm.main()
+        all_counts, invalids = run_ftm.main()
         all_counts_dir = os.path.join(self.output_dir, self.file_prefix + "_all_counts")
         if os.path.exists(all_counts_dir):
             shutil.rmtree(all_counts_dir, ignore_errors=True)
@@ -315,72 +326,62 @@ class ShortStack():
         # cleanup
         del encoded_df, mutant_fasta
         gc.collect()
-        #
-        #         #############################
-        #         ###   valid off targets   ###
-        #         #############################
-        # #         # save valid barcodes that are off target
-        # #         print("Saving off-target barcode information...\n")
-        # #
-        # #         @jit(parallel=True)
-        # #         def save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls):
-        # #
-        # #             # filter s6 for valid 3spotters not found in encoding file
-        # #             no_invalids = dd.merge(s6_df, parity_df.drop_duplicates(),
-        # #                                 on=['FeatureID','BC', 'pool', 'cycle'],
-        # #                                 how='left', indicator=True)
-        # #
-        # #             # pull out feature id's/basecalls that are only in s6_df and not in invalids
-        # #             no_invalids = no_invalids[no_invalids._merge == "left_only"]
-        # #             no_invalids = no_invalids.drop(["_merge", "idx"], axis=1)
-        # #
-        # #
-        # #             # prep hamming_df for merge
-        # #             hamming_df = hamming_df[["FeatureID", "BC", "cycle", "pool"]]
-        # #             hamming_df = hamming_df.drop_duplicates().reset_index(drop=True)
-        # #
-        # #             # pull out featureID/BC that are in s6 but not in hamming=not hitting targets
-        # #             valid_offTargets = dd.merge(no_invalids, hamming_df,
-        # #                        how='left', indicator=True)
-        # #
-        # #             valid_offTargets = valid_offTargets[valid_offTargets._merge == "left_only"]
-        # #             valid_offTargets = valid_offTargets.drop(["_merge"], axis=1)
-        # #
-        # #
-        # #             # pull out features with ftm votes
-        # #             final_offTargets = dd.merge(valid_offTargets,
-        # #                                         ftm_calls[["FeatureID"]],
-        # #                                         on=["FeatureID"],
-        # #                                         how='left',
-        # #                                         indicator=True)
-        # #             final_offTargets = final_offTargets[final_offTargets._merge == "left_only"]
-        # #             final_offTargets = final_offTargets.drop(["_merge"], axis=1)
-        # #             raise SystemExit(final_offTargets.head())
-        # #             # compute data frame
-        # #             final_offTargets = self.client.compute(final_offTargets)
-        # #             final_offTargets = self.client.gather(final_offTargets)
-        # #
-        # #             # sort output
-        # #             final_offTargets = final_offTargets.sort_values(by=["FeatureID", "pool",
-        # #                                                                 "cycle", "BC"])
-        # #
-        # #             # save to file
-        # #             valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
-        # #             final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
-        # #
-        # #         save_validOffTarget(s6_df, parity_df, hamming_df, ftm_calls)
-        # #
-        # #         # clean up
-        # #         del parity_df, s6_df, hamming_df
-        # #         gc.collect()
-        # #
-        # #         # check for ftm_only option
-        # #         if self.ftm_only:
-        # #             ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
-        # #             raise SystemExit(ftm_message)
-        # #         else:
-        # #             print("FTM complete. Sequencing results...\n")
-        # #
+
+        #############################
+        ###   valid off targets   ###
+        #############################
+        # save valid barcodes that are off target
+        print("Saving off-target barcode information...\n")
+
+        @jit(parallel=True)
+        def save_validOffTarget(s6_df, parity_df, invalids):
+
+            if len(parity_df) > 1:
+                # filter s6 for valid 3spotters not found in encoding file
+                unmapped = dd.merge(s6_df, parity_df.drop_duplicates(),
+                                on=['FeatureID','BC', 'pool', 'cycle'],
+                                how='left', indicator=True)
+
+                # pull out feature id's/basecalls that are only in s6_df and not in invalids
+                unmapped = unmapped[unmapped._merge == "left_only"]
+                unmapped = unmapped.drop(["_merge", "idx"], axis=1)
+            else:
+                unmapped = ""
+
+            # find invalid barcodes
+            invalid_dfs = [unmapped, invalids]
+            concat_list = []
+            for df in invalid_dfs:
+                if len(df) > 1:
+                    concat_list.append(df)
+
+            # concatenate invalids
+            if len(concat_list) > 1:
+                invalid_df = dd.concat(concat_list)
+            elif len(concat_list) == 1:
+                invalid_df = concat_list[0]
+            else:
+                invalid_df = ""
+
+            return all_counts, invalid_df
+
+            # save to file
+            valids_off_out = os.path.join(self.output_dir, "valid_offTargets.tsv")
+            final_offTargets.to_csv(valids_off_out, sep="\t", index=False)
+
+        save_validOffTarget(s6_df, parity_df, invalids)
+
+        # clean up
+        del parity_df, s6_df
+        gc.collect()
+
+        # check for ftm_only option
+        if self.ftm_only:
+            ftm_message = "FTM complete. Update ftm_only to run sequencing and consensus pipelines."
+            raise SystemExit(ftm_message)
+        else:
+            print("FTM complete. Sequencing results...\n")
+
         # ####################
         ###   Sequence   ###
         ####################
