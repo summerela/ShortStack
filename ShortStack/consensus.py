@@ -143,7 +143,9 @@ class Consensus():
 
         # coerce results to dataframe
         base_df = pd.DataFrame.from_dict(graph, orient='index')
-        base_df["pos"] = base_df.index.astype(int) + start_pos
+        base_df = base_df.reset_index(drop=False)
+        base_df = base_df.rename(columns={"index":"pos"})
+        base_df = base_df.fillna(0)
 
         # cover any bases not found
         col_list = ["A", "T", "G", "C", "-"]
@@ -156,14 +158,6 @@ class Consensus():
 
         # calc number of features with ftm call to region
         base_df["sample_size"] = len(grp)
-        base_df = base_df.fillna(0)
-
-
-        # convert counts to allele frequencies
-        base_df["A"] = round((base_df["A"] / base_df.sample_size) * 100, 2)
-        base_df["T"] = round((base_df["T"] / base_df.sample_size) * 100, 2)
-        base_df["G"] = round(base_df["G"] / base_df.sample_size * 100, 2)
-        base_df["C"] = round(base_df["C"] / base_df.sample_size * 100, 2)
 
         return base_df
 
@@ -212,17 +206,16 @@ class Consensus():
             target, alignment, score, start, align_len = a
             pct_sim = round(score / align_len * 100, 2)
 
-            return [x.chrom, x.region, alignment, x.ref_seq, pct_sim]
+            return [x.chrom, x.start, x.region, alignment, x.ref_seq, pct_sim]
 
     @jit(parallel=True)
     def find_variants(self, row):
-
         # create dictionary of variants for each position
         var_graph = defaultdict(defaultdict)
         if row.pct_sim != 100:
             for idx, (alt, ref) in enumerate(zip(row.alignment, row.ref_seq)):
                 if alt != ref:
-                    var_graph[str(row.chrome)+"$"+str(row.region)][idx] = {"ref":ref, "alt":alt}
+                    var_graph[str(row.chrom)+"$"+str(row.start_pos)+"$"+str(row.region)][idx] = {"ref":ref, "alt":alt}
 
         return var_graph
 
@@ -249,7 +242,9 @@ class Consensus():
         # flatten dictionary into columns for ref and alt, one per row
         df = pd.concat([df, json_normalize(df["vars"])], axis=1)
         df = df.drop("vars", axis=1)
-        df[["chrom", "region"]] = df['region'].str.split('$',expand=True)
+        df[["chrom", "start", "region"]] = df['region'].str.split('$',expand=True)
+        df["pos"] = df.pos.astype(int) + df.start.astype(int)
+        df = df.drop("start", axis=1)
         df = df.sort_values(["region", "pos"])
 
         # group together indels by consecutive position within region
@@ -275,6 +270,11 @@ class Consensus():
     @jit(parallel=True)
     def make_vcf(self, var_df, base_df):
 
+        var_df["ID"] = var_df.ID.astype(str)
+        var_df["POS"] = var_df.POS.astype(int)
+        base_df["region"] = base_df.region.astype(str)
+        base_df["pos"] = base_df.pos.astype(int)
+
         # pull in count information
         vcf_df = var_df.merge(base_df,
                               left_on=['ID', 'POS'],
@@ -284,13 +284,12 @@ class Consensus():
         # parse into vcf format
         vcf_df["INFO"] = "DP=" + vcf_df.DP.astype(str) + ";" + \
                        "QV=" + vcf_df.QV.astype(str) + ";" + \
-                       "VF=" + vcf_df.VF.astype(str)
+                       "VF=" + vcf_df.AF.astype(str)
 
         # remove unnecessary columns
-        vcf_df = vcf_df.drop(["DP", "VF", "QV",
+        vcf_df = vcf_df.drop(["DP", "AF", "QV",
                           "A", "T", "G", "C", "-",
                         'region', 'pos', 'nuc', 'sample_size'], axis=1)
-
         return vcf_df
 
     def write_vcf(self, vcf_df):
@@ -334,7 +333,7 @@ class Consensus():
         # calculate depth at each base
         base_df["DP"] = round(base_df[["A", "T", "G", "C", "-"]].sum(axis=1), 2)
         # calculate allele freq
-        base_df["VF"] = round(((base_df.lookup(base_df.index, base_df.nuc) / base_df["DP"]) * 100), 2)
+        base_df["AF"] = round(((base_df.lookup(base_df.index, base_df.nuc) / base_df["DP"]) * 100), 2)
 
         # write base call counts to file
         base_file = os.path.join(self.out_dir, self.output_prefix + "_counts.tsv")
@@ -361,9 +360,10 @@ class Consensus():
         print("Aligning consensus sequences...\n")
         alignments = pd.DataFrame(seq_df.apply(self.align_seqs, axis=1))
         alignments.columns = ["align_list"]
-        alignments[['chrome', 'region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(alignments.align_list.values.tolist(),
+        alignments[['chrom', 'start_pos','region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(alignments.align_list.values.tolist(),
                             index=alignments.index).reset_index(drop=True)
         alignments = alignments.drop("align_list", axis=1)
+
         alignment_out = os.path.join(self.output_dir,
                         self.output_prefix + "_" + self.today + "_consensus.tsv")
         alignments.to_csv(alignment_out, sep="\t", index=False)
