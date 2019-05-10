@@ -124,7 +124,7 @@ class Sequencer():
         print("Counting reads per base...\n")
         # split reads up by base
         base_df = self.counts.groupby(["FeatureID"]).apply(self.get_path).reset_index(drop=False)
-        base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "U", "-", "max_nuc", "region"]
+        base_df.columns = ["FeatureID", "pos", "A", "C", "T", "G", "U", "-", "max_nuc", "region"]
 
         # save to a file
         base_out = os.path.join(self.output_dir, self.prefix + "_base_counts.tsv")
