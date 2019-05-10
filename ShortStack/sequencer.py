@@ -60,7 +60,7 @@ class Sequencer():
         base_df = pd.DataFrame.from_dict(graph, orient='index')
 
         # ensure that dataframe contains all possible nuc columns
-        col_list = ["A", "T", "G", "C", "-"]
+        col_list = ["A", "T", "G", "C", "U", "-"]
         for col in col_list:
             if col not in base_df:
                 base_df[col] = 0.0
@@ -69,7 +69,7 @@ class Sequencer():
         base_df = base_df.fillna(0.0)
 
         # pull out nuc with max count
-        base_df["nuc"] = base_df[["A", "T", "G", "C", "-"]].idxmax(axis=1)
+        base_df["nuc"] = base_df[["A", "T", "G", "C", "U", "-"]].idxmax(axis=1)
 
         # add regional info
         base_df["region"] = grp.region.unique()[0]
@@ -114,7 +114,8 @@ class Sequencer():
         # for each alignment in alignment object, return aligned sequence only
         for a in alignments:
             query, alignment, score, start, align_len = a
-            return alignment
+            pct_sim = round(score / align_len * 100, 2)
+            return [x.FeatureID, x.chrom, x.start, x.region, alignment, x.ref_seq, pct_sim]
     
    
     @jit(parallel=True)
@@ -123,7 +124,7 @@ class Sequencer():
         print("Counting reads per base...\n")
         # split reads up by base
         base_df = self.counts.groupby(["FeatureID"]).apply(self.get_path).reset_index(drop=False)
-        base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "-", "max_nuc", "region"]
+        base_df.columns = ["FeatureID", "pos", "A", "C", "G", "T", "U", "-", "max_nuc", "region"]
 
         # save to a file
         base_out = os.path.join(self.output_dir, self.prefix + "_base_counts.tsv")
@@ -147,8 +148,13 @@ class Sequencer():
         seq_df["feature_seq"] = seq_df.feature_seq.str.strip()
         
         print("Aligning consensus sequences...\n")
-        seq_df["alignment"] = seq_df.apply(self.align_seqs,
-                                           axis=1)
+        alignments = pd.DataFrame(seq_df.apply(self.align_seqs,
+                                           axis=1))
+        alignments.columns = ["align_list"]
+        alignments[['FeatureID', 'chrom', 'start_pos', 'region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(
+            alignments.align_list.values.tolist(),
+            index=alignments.index).reset_index(drop=True)
+        alignments = alignments.drop("align_list", axis=1)
 
         return seq_df
         

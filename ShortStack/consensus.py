@@ -154,7 +154,7 @@ class Consensus():
                 base_df[col] = 0.0
 
         # get nucleotide with highest count
-        base_df["nuc"] = base_df[["A", "T", "G", "C", "-"]].idxmax(axis=1)
+        base_df["nuc"] = base_df[["A", "T", "G", "C", "U", "-"]].idxmax(axis=1)
 
         # calc number of features with ftm call to region
         base_df["sample_size"] = len(grp)
@@ -288,7 +288,7 @@ class Consensus():
 
         # remove unnecessary columns
         vcf_df = vcf_df.drop(["DP", "AF", "QV",
-                          "A", "T", "G", "C", "-",
+                          "A", "T", "G", "C", "U", "-",
                         'region', 'pos', 'nuc', 'sample_size'], axis=1)
         return vcf_df
 
@@ -329,9 +329,9 @@ class Consensus():
         print("Counting reads per base...\n")
         # split reads up by base
         base_df = mol_df.groupby(["region"]).apply(self.get_path).reset_index(drop=False)
-        base_df = base_df[["region", "pos", "A", "T", "G", "C", "-", "nuc", "sample_size"]]
+        base_df = base_df[["region", "pos", "A", "T", "G", "C", "U", "-", "nuc", "sample_size"]]
         # calculate depth at each base
-        base_df["DP"] = round(base_df[["A", "T", "G", "C", "-"]].sum(axis=1), 2)
+        base_df["DP"] = round(base_df[["A", "T", "G", "C", "U", "-"]].sum(axis=1), 2)
         # calculate allele freq
         base_df["AF"] = round(((base_df.lookup(base_df.index, base_df.nuc) / base_df["DP"]) * 100), 2)
 

@@ -44,17 +44,18 @@ class AssembleMutations():
         query = '''select m_df.chrom, m_df.pos,
             m_df.id as var_id, m_df.ref, m_df.alt,
             f_df.id as region, m_df.mut_type, m_df.strand, 
-            f_df.seq as ref_seq, f_df.start as ref_start, f_df.build
+            f_df.seq as ref_seq, f_df.start as ref_start, f_df.stop as ref_stop, f_df.build
             from m_df  
             inner join f_df  
             on 
             m_df.chrom = f_df.chrom 
-            where m_df.pos between f_df.start and f_df.stop
+            where (m_df.pos between f_df.start and f_df.stop)
+                or (m_df.pos between f_df.stop and f_df.start)
             and m_df.strand = f_df.strand
         '''
         # pull out mutations that are valid
         # note, pandas query not supporting merge 'where pos between start and stop'
-        valid_mutations = psql.sqldf(query)  
+        valid_mutations = psql.sqldf(query)
 
         # check that there are any valid mutations
         error_message = "No valid mutations found within wildtype regions."
@@ -75,10 +76,12 @@ class AssembleMutations():
         output: filters out invalid mutations that do not fall within the genomic 
             range of any input reference sequences
         '''
-        
+        valids['var_start'] = None
+        valids.loc[valids['strand'] == '-', ['var_start']] = (valids["pos"].astype(int) - valids["ref_stop"].astype(int))
+
         # calculate variant starting position on reference
-        valids["var_start"] = (valids["pos"].astype(int) - valids["ref_start"].astype(int))
-        
+        valids.loc[valids['strand'] == '+', ['var_start']] =(valids["pos"].astype(int) - valids["ref_start"].astype(int))
+
         # pull out the invalids to add to log
         invalids = self.mutation_df[~self.mutation_df['id'].isin(valids['var_id'])]
 
@@ -91,11 +94,11 @@ class AssembleMutations():
             var_line = '''
             \n The following variants were not located within a ref seq and were omitted:\n''' +\
              ','.join(invalid_list) + "\n"
-                
+            print(var_line)
             log.info(var_line)   
-         
+
         return valids
-    
+
     def check_valids(self, valid_mutations):
         '''
         purpose: checks that the specified reference allele from the vcf file
@@ -116,7 +119,6 @@ class AssembleMutations():
         input: mutation_df from assemble_mutations
         output: fasta_df of combined reference and alternate sequences for assembly
         '''
-    
         # process deletions
         input_df.alt_seq[(input_df.mut_type == 'DEL')] = \
             [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] +  \
@@ -134,7 +136,7 @@ class AssembleMutations():
             [seq[0:n] for n, seq in zip((input_df.var_start), input_df.ref_seq)] + \
             input_df["alt"]+ \
             [seq[n:] for n, seq in zip((input_df.var_start +1), input_df.ref_seq)]
-            
+
         input_df.alt_seq = input_df.alt_seq.str.strip()
 
         return input_df
@@ -171,7 +173,7 @@ class AssembleMutations():
         valid_dict = {"id":valid_mutations["var_id"]+"_mut",
                       "chrom":valid_mutations["chrom"],
                       "start":valid_mutations["ref_start"],
-                      "stop":(valid_mutations["ref_start"].astype(int) + valid_mutations["mut_length"].astype(int)),
+                      "stop":valid_mutations["ref_stop"],
                       "seq":valid_mutations["alt_seq"],
                       "strand":valid_mutations["strand"],
                       "region":valid_mutations["region"]

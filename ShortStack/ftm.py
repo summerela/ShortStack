@@ -55,7 +55,7 @@ class FTM():
             fasta_df = input_fasta
             
         fasta_df = fasta_df.reset_index(drop=True)
-        
+
         return fasta_df
     
     @jit(parallel=True)
