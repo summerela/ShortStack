@@ -2,7 +2,7 @@
 sequencer.py
 
 '''
-import sys, warnings, logging, os, swifter, dask
+import sys, warnings, logging, dask, os
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 from numba import jit
@@ -10,8 +10,7 @@ import pandas as pd
 from collections import defaultdict, Counter
 from Bio import pairwise2
 dask.config.set(scheduler='tasks')
-pd.set_option('display.max_columns', 100)
-
+from operator import itemgetter
 
 # import logger
 log = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ class Sequencer():
         self.counts.pos = self.counts.pos.astype(int)
         self.counts.bc_count = self.counts.bc_count.astype(float)
         self.fasta = fasta_df
-        self.fasta.columns = ['ref_seq', 'id', 'chrom', 'start', 'stop', 'build', 'strand', 'region']
+        self.fasta = self.fasta.rename(columns={"seq":"ref_seq"})
         self.output_dir = out_dir
         self.prefix = prefix
         self.client = client
@@ -92,35 +91,54 @@ class Sequencer():
         seq_list.append(seq_tup)
         
         return seq_list
-    
-    @jit(parallel=True)
-    def align_seqs(self, x):    
-        
-        # parameters may need to be experimentally adjusted
-        query = x.feature_seq
-        target = x.ref_seq
 
-        if self.align_params == "supervised":
-            alignments = pairwise2.align.localms(target,
-                                                  query,
-                                                  1, 0, -3, -.1,  # recommended penalties to favor snv over indel
-                                                  one_alignment_only=True)  # returns only best score
+    def align_seqs(self, x):
+
+        # pull out attributes for feature
+        query = ''.join(x.feature_seq.unique())
+        target = x.ref_seq.to_list()
+        featureID = x.name
+        chrom = ''.join(x.chrom.unique())
+        xStart = ''.join(x.start.unique())
+        region = ''.join(x.region.unique())
+        refSeq = ''.join(x.ref_seq.unique())
+
+        align_list = []
+        for ref in target:
+
+            if self.align_params == "supervised":
+                alignment = pairwise2.align.localms(ref,
+                                                      query,
+                                                      1, 0, -3, -.1,  # recommended penalties to favor snv over indel
+                                                      one_alignment_only=True)  # returns only best score
+            else:
+                alignment = pairwise2.align.localms(ref,
+                                                      query,
+                                                      1, -1, -2, 0,  # recommended penalties to favor snv over indel
+                                                      one_alignment_only=True)  # returns only best score
+            align_list.append(alignment)
+
+        # find alignment with max score
+        flat_list = [item for sublist in align_list for item in sublist]
+
+        if len(flat_list) > 1:
+            max_alignment = max(flat_list, key=itemgetter(2))
         else:
-            alignments = pairwise2.align.localms(target,
-                                                  query,
-                                                  1, -1, -2, 0,  # recommended penalties to favor snv over indel
-                                                  one_alignment_only=True)  # returns only best score
+            max_alignment = [item for sublist in flat_list for item in sublist]
 
-        # for each alignment in alignment object, return aligned sequence only
-        for a in alignments:
-            query, alignment, score, start, align_len = a
-            pct_sim = round(score / align_len * 100, 2)
-            return [x.FeatureID, x.chrom, x.start, x.region, alignment, x.ref_seq, pct_sim]
-    
-   
+        # return formatted max alignment
+        alignment = max_alignment[1]
+        score = max_alignment[2]
+        align_len = max_alignment[4]
+        pct_sim = round(score/align_len*100, 2)
+
+        aligned = [featureID, chrom, xStart, region, alignment, refSeq, pct_sim]
+
+        return aligned
+
     @jit(parallel=True)
     def main(self):
-        
+
         print("Counting reads per base...\n")
         # split reads up by base
         base_df = self.counts.groupby(["FeatureID"]).apply(self.get_path).reset_index(drop=False)
@@ -134,28 +152,25 @@ class Sequencer():
         ## return consensus sequence
         seq_list = base_df.groupby("FeatureID").apply(self.join_seq)
         df = pd.DataFrame(seq_list).reset_index(drop=True)
-        df1 = pd.DataFrame(df[0].tolist(), index=df.index) 
-        seq_df = pd.DataFrame(df1[0].tolist(), index=df1.index) 
+        df1 = pd.DataFrame(df[0].tolist(), index=df.index)
+        seq_df = pd.DataFrame(df1[0].tolist(), index=df1.index)
         seq_df.columns = ["FeatureID", "region", "feature_seq"]
-        
+
         print("Adding reference sequences to align...\n")
         ## add reference sequence for each feature
         seq_df = seq_df.merge(self.fasta,
                      on=["region"],
-                     how='left')  
+                     how='left')
         # strip new line characters from sequences
         seq_df["ref_seq"] = seq_df.ref_seq.str.strip()
         seq_df["feature_seq"] = seq_df.feature_seq.str.strip()
-        
+
         print("Aligning consensus sequences...\n")
-        alignments = pd.DataFrame(seq_df.apply(self.align_seqs,
-                                           axis=1))
+        alignments = pd.DataFrame(seq_df.groupby("FeatureID").apply(self.align_seqs).reset_index(drop=True))
         alignments.columns = ["align_list"]
         alignments[['FeatureID', 'chrom', 'start_pos', 'region', 'alignment', 'ref_seq', 'pct_sim']] = pd.DataFrame(
             alignments.align_list.values.tolist(),
             index=alignments.index).reset_index(drop=True)
         alignments = alignments.drop("align_list", axis=1)
 
-        return seq_df
-        
-        
+        return alignments

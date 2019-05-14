@@ -660,8 +660,10 @@ class FTM():
             invalid_df = concat_list[0]
         else:
             invalid_df = ""
+
+        fasta_df = fasta_df.drop("ngram_list", axis=1)
         
-        return all_counts, invalid_df
+        return all_counts, invalid_df, fasta_df
 
         
        

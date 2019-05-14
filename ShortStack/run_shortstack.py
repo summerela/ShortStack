@@ -315,7 +315,7 @@ class ShortStack():
                           self.client
                           )
         # run FTM
-        all_counts, invalids = run_ftm.main()
+        all_counts, invalids, final_fasta = run_ftm.main()
         all_counts_dir = os.path.join(self.output_dir, self.file_prefix + "_all_counts")
         if os.path.exists(all_counts_dir):
             shutil.rmtree(all_counts_dir, ignore_errors=True)
@@ -388,7 +388,7 @@ class ShortStack():
         print("Sequencing...\n")
         # instantiate molecule sequencing module from sequencer.py
         sequence = seq.Sequencer(all_counts,
-                                 fasta_df,
+                                 final_fasta,
                                  self.output_dir,
                                  self.file_prefix,
                                  self.cpus,
@@ -399,7 +399,7 @@ class ShortStack():
 
         # saving output for consensus sequencing
         fasta_out = os.path.join(self.output_dir, self.file_prefix + "_fasta.tsv")
-        fasta_df.to_csv(fasta_out, sep="\t",
+        final_fasta.to_csv(fasta_out, sep="\t",
                         index=False,
                         quoting = csv.QUOTE_NONE,
                         escapechar = ' ')
